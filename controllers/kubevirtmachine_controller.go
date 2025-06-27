@@ -27,7 +27,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	capierrors "sigs.k8s.io/cluster-api/errors"
@@ -392,42 +391,44 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		return ctrl.Result{}, nil
 	}
 
-	workloadClusterClient, err := r.WorkloadCluster.GenerateWorkloadClusterClient(ctx)
-	if err != nil {
-		ctx.Logger.Error(err, "Workload cluster client is not available")
-	}
-	if workloadClusterClient == nil {
-		ctx.Logger.Info("Waiting for workload cluster client...")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	}
+	// Commenting out the check for workload cluster client for now, as it is delays the update of the provider ID on the node.
+	// Will validate if this being commented out helps with making the provider ID update faster and hence the machine being marked ready.
+	// workloadClusterClient, err := r.WorkloadCluster.GenerateWorkloadClusterClient(ctx)
+	// if err != nil {
+	// 	ctx.Logger.Error(err, "Workload cluster client is not available")
+	// }
+	// if workloadClusterClient == nil {
+	// 	ctx.Logger.Info("Waiting for workload cluster client...")
+	// 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// }
 
-	// using workload cluster client, get the corresponding cluster node
-	workloadClusterNode := &corev1.Node{}
-	workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
-	if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
-		if apierrors.IsNotFound(err) {
-			ctx.Logger.Info(fmt.Sprintf("Waiting for workload cluster node to appear for machine %s/%s...", ctx.KubevirtMachine.Namespace, ctx.KubevirtMachine.Name))
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		} else {
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
-		}
-	}
+	// // using workload cluster client, get the corresponding cluster node
+	// workloadClusterNode := &corev1.Node{}
+	// workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
+	// if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
+	// 	if apierrors.IsNotFound(err) {
+	// 		ctx.Logger.Info(fmt.Sprintf("Waiting for workload cluster node to appear for machine %s/%s...", ctx.KubevirtMachine.Namespace, ctx.KubevirtMachine.Name))
+	// 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// 	} else {
+	// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
+	// 	}
+	// }
 
-	if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
-		// Node is already updated, return
-		return ctrl.Result{}, nil
-	}
+	// if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
+	// 	// Node is already updated, return
+	// 	return ctrl.Result{}, nil
+	// }
 
-	// Patch node with provider id.
-	// Usually a cloud provider will do this, but there is no cloud provider for KubeVirt.
-	ctx.Logger.Info("Patching node with provider id...")
+	// // Patch node with provider id.
+	// // Usually a cloud provider will do this, but there is no cloud provider for KubeVirt.
+	// ctx.Logger.Info("Patching node with provider id...")
 
-	// using workload cluster client, patch cluster node
-	patchStr := fmt.Sprintf(`{"spec": {"providerID": "%s"}}`, *ctx.KubevirtMachine.Spec.ProviderID)
-	mergePatch := client.RawPatch(types.MergePatchType, []byte(patchStr))
-	if err := workloadClusterClient.Patch(ctx, workloadClusterNode, mergePatch); err != nil {
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
-	}
+	// // using workload cluster client, patch cluster node
+	// patchStr := fmt.Sprintf(`{"spec": {"providerID": "%s"}}`, *ctx.KubevirtMachine.Spec.ProviderID)
+	// mergePatch := client.RawPatch(types.MergePatchType, []byte(patchStr))
+	// if err := workloadClusterClient.Patch(ctx, workloadClusterNode, mergePatch); err != nil {
+	// 	return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
+	// }
 	ctx.KubevirtMachine.Status.NodeUpdated = true
 
 	return ctrl.Result{}, nil
