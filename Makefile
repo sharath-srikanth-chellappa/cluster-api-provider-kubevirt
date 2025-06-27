@@ -39,6 +39,22 @@ BIN_DIR := bin
 TOOLS_DIR := hack/tools
 TOOLS_BIN_DIR := $(TOOLS_DIR)/bin
 
+ENVSUBST_VER := v2.0.0-20210730161058-179042472c46
+ENVSUBST_BIN := envsubst
+ENVSUBST := $(TOOLS_BIN_DIR)/$(ENVSUBST_BIN)-$(ENVSUBST_VER)
+
+# Version
+MAJOR_VER ?= 0
+MINOR_VER ?= 1
+PATCH_VER ?= 0
+VER_SUFFIX ?= -alpha
+TAG := $(MAJOR_VER).$(MINOR_VER).$(PATCH_VER)$(VER_SUFFIX)
+
+# Local repository path for development
+export CAPKV_REPOSITORY := local-repository/infrastructure-kubevirt/v$(TAG)
+export LOCAL_REPOSITORY := $(HOME)/$(CAPKV_REPOSITORY)
+
+
 # Set --output-base for conversion-gen if we are not within GOPATH
 ifneq ($(abspath $(ROOT_DIR)),$(shell go env GOPATH)/src/sigs.k8s.io/cluster-api-provider-kubevirt)
 	CONVERSION_GEN_OUTPUT_BASE := --output-base=$(ROOT_DIR)
@@ -58,8 +74,8 @@ CONTROLLER_IMG ?= $(REGISTRY)/$(IMAGE_NAME)
 ARCH ?= amd64
 ALL_ARCH = amd64 arm arm64
 
-# TAG is set to GIT_TAG in GCB, a git-based tag of the form vYYYYMMDD-hash, e.g., v20210120-v0.3.10-308-gc61521971.
-TAG ?= dev
+# # TAG is set to GIT_TAG in GCB, a git-based tag of the form vYYYYMMDD-hash, e.g., v20210120-v0.3.10-308-gc61521971.
+# TAG ?= dev
 
 # Allow overriding the imagePullPolicy
 PULL_POLICY ?= Always
@@ -270,6 +286,42 @@ ifeq ($(shell uname -s), Darwin)
 else
 	sed -i -e 's@imagePullPolicy: .*@imagePullPolicy: '"$(PULL_POLICY)"'@' ./config/default/manager_pull_policy.yaml
 endif
+
+## --------------------------------------
+## Development
+## --------------------------------------
+
+# Directories.
+ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+TOOLS_DIR := hack/tools
+TOOLS_BIN_DIR := $(abspath $(TOOLS_DIR)/bin)
+BIN_DIR := bin
+GO_INSTALL = ./scripts/go_install.sh
+
+$(ENVSUBST): ## Build envsubst from tools folder.
+	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) github.com/drone/envsubst/v2/cmd/envsubst $(ENVSUBST_BIN) $(ENVSUBST_VER)
+
+.PHONY: dev-release
+dev-release:
+	#$(MAKE) generate
+	$(MAKE) docker-build
+	$(MAKE) docker-push
+	$(MAKE) release
+
+.PHONY: create-local-provider-repository
+create-local-provider-repository: $(ENVSUBST) create-infrastructure-components
+	# Create the required directories
+	mkdir -p $(LOCAL_REPOSITORY)/
+	mkdir -p $(HOME)/.cluster-api/
+	# Prepare configuration file for clusterctl
+	cat hack/clusterctl.yaml | $(ENVSUBST) > $(HOME)/.cluster-api/clusterctl.yaml
+	# Prepare metadata yaml for clusterctl
+	# sed -i'' -e 's@major: .*@major: '"$(MAJOR_VER)"'@' ./metadata.yaml
+	# sed -i'' -e 's@minor: .*@minor: '"$(MINOR_VER)"'@' ./metadata.yaml
+	# Populate the local repository
+	cp metadata.yaml $(LOCAL_REPOSITORY)
+	cp infrastructure-components.yaml $(LOCAL_REPOSITORY)
+	cp templates/cluster-template-capkv.yaml $(LOCAL_REPOSITORY)/cluster-template.yaml
 
 ## --------------------------------------
 ## Deployment

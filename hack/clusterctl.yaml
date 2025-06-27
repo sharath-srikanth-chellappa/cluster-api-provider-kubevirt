@@ -1,0 +1,5 @@
+providers:
+  # add CAPKV as a custom provider with local repository
+  - name: "kubevirt"
+    url: "${LOCAL_REPOSITORY}/infrastructure-components.yaml"
+    type: "InfrastructureProvider"
