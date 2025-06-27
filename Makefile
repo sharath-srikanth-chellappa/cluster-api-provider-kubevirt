@@ -306,7 +306,6 @@ dev-release:
 	#$(MAKE) generate
 	$(MAKE) docker-build
 	$(MAKE) docker-push
-	$(MAKE) release
 
 .PHONY: create-local-provider-repository
 create-local-provider-repository: $(ENVSUBST) create-infrastructure-components
