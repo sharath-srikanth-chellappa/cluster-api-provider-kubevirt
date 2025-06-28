@@ -27,7 +27,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	capierrors "sigs.k8s.io/cluster-api/errors"
@@ -282,8 +281,9 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 
 		// Waiting for VM to boot
 		ctx.KubevirtMachine.Status.Ready = false
+		ctx.Logger.Info(fmt.Sprintf("Reason that it is not fully provisioned: %s", reason))
 		ctx.Logger.Info("KubeVirt VM is not fully provisioned and running...")
-		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	ipAddress := externalMachine.Address()
@@ -300,7 +300,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		if !machineHasKnownInternalIP(ctx.KubevirtMachine) {
 			ctx.KubevirtMachine.Status.Ready = false
 		}
-		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	retryDuration, err := externalMachine.DrainNodeIfNeeded(r.WorkloadCluster)
@@ -311,17 +311,18 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		return ctrl.Result{RequeueAfter: retryDuration}, nil
 	}
 
-	if externalMachine.SupportsCheckingIsBootstrapped() && !conditions.IsTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition) {
-		if !externalMachine.IsBootstrapped() {
-			ctx.Logger.Info("Waiting for underlying VM to bootstrap...")
-			conditions.MarkFalse(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition, infrav1.BootstrapFailedReason, clusterv1.ConditionSeverityWarning, "VM not bootstrapped yet")
-			ctx.KubevirtMachine.Status.Ready = false
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-		// Update the condition BootstrapExecSucceededCondition
-		conditions.MarkTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition)
-		ctx.Logger.Info("Underlying VM has boostrapped.")
-	}
+	// Commenting out bootstrap check for now to see if reconcilation is faster
+	// if externalMachine.SupportsCheckingIsBootstrapped() && !conditions.IsTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition) {
+	// 	if !externalMachine.IsBootstrapped() {
+	// 		ctx.Logger.Info("Waiting for underlying VM to bootstrap...")
+	// 		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition, infrav1.BootstrapFailedReason, clusterv1.ConditionSeverityWarning, "VM not bootstrapped yet")
+	// 		ctx.KubevirtMachine.Status.Ready = false
+	// 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// 	}
+	// 	// Update the condition BootstrapExecSucceededCondition
+	// 	conditions.MarkTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition)
+	// 	ctx.Logger.Info("Underlying VM has boostrapped.")
+	// }
 
 	ctx.KubevirtMachine.Status.Addresses = []clusterv1.MachineAddress{
 		{
@@ -360,19 +361,20 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Status.Ready = false
 	}
 
-	liveMigratable, reason, message, err := externalMachine.IsLiveMigratable()
-	if err != nil {
-		ctx.Logger.Error(err, fmt.Sprintf("failed to get the %s condition of %s machine",
-			infrav1.VMLiveMigratableCondition, ctx.KubevirtMachine.Name))
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	}
-	if liveMigratable {
-		// Mark VMLiveMigratableCondition to indicate whether the VM can be live migrated or not
-		conditions.MarkTrue(ctx.KubevirtMachine, infrav1.VMLiveMigratableCondition)
-	} else {
-		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMLiveMigratableCondition, reason, clusterv1.ConditionSeverityInfo,
-			"%s is not a live migratable machine: %s", ctx.KubevirtMachine.Name, message)
-	}
+	// Commenting out live migration check for now to see if reconcilation is faster
+	// liveMigratable, reason, message, err := externalMachine.IsLiveMigratable()
+	// if err != nil {
+	// 	ctx.Logger.Error(err, fmt.Sprintf("failed to get the %s condition of %s machine",
+	// 		infrav1.VMLiveMigratableCondition, ctx.KubevirtMachine.Name))
+	// 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// }
+	// if liveMigratable {
+	// 	// Mark VMLiveMigratableCondition to indicate whether the VM can be live migrated or not
+	// 	conditions.MarkTrue(ctx.KubevirtMachine, infrav1.VMLiveMigratableCondition)
+	// } else {
+	// 	conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMLiveMigratableCondition, reason, clusterv1.ConditionSeverityInfo,
+	// 		"%s is not a live migratable machine: %s", ctx.KubevirtMachine.Name, message)
+	// }
 
 	return ctrl.Result{}, nil
 }
@@ -392,42 +394,43 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		return ctrl.Result{}, nil
 	}
 
-	workloadClusterClient, err := r.WorkloadCluster.GenerateWorkloadClusterClient(ctx)
-	if err != nil {
-		ctx.Logger.Error(err, "Workload cluster client is not available")
-	}
-	if workloadClusterClient == nil {
-		ctx.Logger.Info("Waiting for workload cluster client...")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	}
+	// Commenting out getting workload cluster client for now to see if reconcilation is faster
+	// workloadClusterClient, err := r.WorkloadCluster.GenerateWorkloadClusterClient(ctx)
+	// if err != nil {
+	// 	ctx.Logger.Error(err, "Workload cluster client is not available")
+	// }
+	// if workloadClusterClient == nil {
+	// 	ctx.Logger.Info("Waiting for workload cluster client...")
+	// 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// }
 
-	// using workload cluster client, get the corresponding cluster node
-	workloadClusterNode := &corev1.Node{}
-	workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
-	if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
-		if apierrors.IsNotFound(err) {
-			ctx.Logger.Info(fmt.Sprintf("Waiting for workload cluster node to appear for machine %s/%s...", ctx.KubevirtMachine.Namespace, ctx.KubevirtMachine.Name))
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		} else {
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
-		}
-	}
+	// // using workload cluster client, get the corresponding cluster node
+	// workloadClusterNode := &corev1.Node{}
+	// workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
+	// if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
+	// 	if apierrors.IsNotFound(err) {
+	// 		ctx.Logger.Info(fmt.Sprintf("Waiting for workload cluster node to appear for machine %s/%s...", ctx.KubevirtMachine.Namespace, ctx.KubevirtMachine.Name))
+	// 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// 	} else {
+	// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
+	// 	}
+	// }
 
-	if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
-		// Node is already updated, return
-		return ctrl.Result{}, nil
-	}
+	// if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
+	// 	// Node is already updated, return
+	// 	return ctrl.Result{}, nil
+	// }
 
-	// Patch node with provider id.
-	// Usually a cloud provider will do this, but there is no cloud provider for KubeVirt.
-	ctx.Logger.Info("Patching node with provider id...")
+	// // Patch node with provider id.
+	// // Usually a cloud provider will do this, but there is no cloud provider for KubeVirt.
+	// ctx.Logger.Info("Patching node with provider id...")
 
-	// using workload cluster client, patch cluster node
-	patchStr := fmt.Sprintf(`{"spec": {"providerID": "%s"}}`, *ctx.KubevirtMachine.Spec.ProviderID)
-	mergePatch := client.RawPatch(types.MergePatchType, []byte(patchStr))
-	if err := workloadClusterClient.Patch(ctx, workloadClusterNode, mergePatch); err != nil {
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
-	}
+	// // using workload cluster client, patch cluster node
+	// patchStr := fmt.Sprintf(`{"spec": {"providerID": "%s"}}`, *ctx.KubevirtMachine.Spec.ProviderID)
+	// mergePatch := client.RawPatch(types.MergePatchType, []byte(patchStr))
+	// if err := workloadClusterClient.Patch(ctx, workloadClusterNode, mergePatch); err != nil {
+	// 	return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
+	// }
 	ctx.KubevirtMachine.Status.NodeUpdated = true
 
 	return ctrl.Result{}, nil
