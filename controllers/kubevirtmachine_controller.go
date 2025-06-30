@@ -199,6 +199,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		return ctrl.Result{}, nil
 	}
 
+	ctx.Logger.Info("reconcileNormal - 1")
 	// Fetch SSH keys to be used for cluster nodes, and update bootstrap script cloud-init with public key
 	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
 
@@ -213,17 +214,20 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		}
 	}
 
+	ctx.Logger.Info("reconcileNormal - 2")
 	// Default the infra cluster secret ref when the
 	// machine does not have one set.
 	if ctx.KubevirtMachine.Spec.InfraClusterSecretRef == nil {
 		ctx.KubevirtMachine.Spec.InfraClusterSecretRef = ctx.KubevirtCluster.Spec.InfraClusterSecretRef
 	}
 
+	ctx.Logger.Info("reconcileNormal - 3")
 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
 	if err != nil {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to generate infra cluster client")
 	}
 
+	ctx.Logger.Info("reconcileNormal - 4")
 	// If there is not a namespace explicitly set on the vm template, then
 	// use the infra namespace as a default. For internal clusters, the infraNamespace
 	// will be the same as the KubeVirtCluster object, for external clusters the
@@ -234,22 +238,26 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		vmNamespace = infraClusterNamespace
 	}
 
+	ctx.Logger.Info("reconcileNormal - 5")
 	if infraClusterClient == nil {
 		ctx.Logger.Info("Waiting for infra cluster client...")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	ctx.Logger.Info("reconcileNormal - 5.5")
 	if err := r.reconcileKubevirtBootstrapSecret(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys); err != nil {
 		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMProvisionedCondition, infrav1.WaitingForBootstrapDataReason, clusterv1.ConditionSeverityInfo, "")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to fetch kubevirt bootstrap secret")
 	}
 
+	ctx.Logger.Info("reconcileNormal - 6")
 	// Create a helper for managing the KubeVirt VM hosting the machine.
 	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
 	}
 
+	ctx.Logger.Info("reconcileNormal - 7")
 	isTerminal, terminalReason, err := externalMachine.IsTerminal()
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed checking VM for terminal state")
@@ -260,6 +268,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Status.FailureMessage = &terminalReason
 	}
 
+	ctx.Logger.Info("reconcileNormal - 8")
 	// Provision the underlying VM if not existing
 	if !isTerminal && !externalMachine.Exists() {
 		ctx.KubevirtMachine.Status.Ready = false
@@ -271,6 +280,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	ctx.Logger.Info("reconcileNormal - 9")
 	// Checks to see if a VM's active VMI is ready or not
 	if externalMachine.IsReady() {
 		// Mark VMProvisionedCondition to indicate that the VM has successfully started
@@ -286,6 +296,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	ctx.Logger.Info("reconcileNormal - 10")
 	// Commenting to check if the reconcilation is faster
 	// ipAddress := externalMachine.Address()
 	// if ipAddress == "" {
@@ -356,6 +367,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Spec.ProviderID = &providerID
 	}
 
+	ctx.Logger.Info("reconcileNormal - 11")
 	// Ready should reflect if the VMI is ready or not
 	if externalMachine.IsReady() {
 		ctx.KubevirtMachine.Status.Ready = true
