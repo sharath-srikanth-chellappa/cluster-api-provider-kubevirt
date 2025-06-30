@@ -268,7 +268,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 			return ctrl.Result{}, errors.Wrap(err, "failed to create VM instance")
 		}
 		ctx.Logger.Info("VM Created, waiting on vm to be provisioned.")
-		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	// Checks to see if a VM's active VMI is ready or not
@@ -286,30 +286,32 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	ipAddress := externalMachine.Address()
-	if ipAddress == "" {
-		ctx.Logger.Info(fmt.Sprintf("KubevirtMachine %s: Got empty ipAddress, requeue", ctx.KubevirtMachine.Name))
-		// Only set readiness to false if we have never detected an internal IP for this machine.
-		//
-		// The internal ipAddress is sometimes detected via the qemu guest agent,
-		// which will report an empty addr at some points when the guest is rebooting
-		// or updating.
-		//
-		// This check prevents us from marking the infrastructure as not ready
-		// when the internal guest might be rebooting or updating.
-		if !machineHasKnownInternalIP(ctx.KubevirtMachine) {
-			ctx.KubevirtMachine.Status.Ready = false
-		}
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
+	// Commenting to check if the reconcilation is faster
+	// ipAddress := externalMachine.Address()
+	// if ipAddress == "" {
+	// 	ctx.Logger.Info(fmt.Sprintf("KubevirtMachine %s: Got empty ipAddress, requeue", ctx.KubevirtMachine.Name))
+	// 	// Only set readiness to false if we have never detected an internal IP for this machine.
+	// 	//
+	// 	// The internal ipAddress is sometimes detected via the qemu guest agent,
+	// 	// which will report an empty addr at some points when the guest is rebooting
+	// 	// or updating.
+	// 	//
+	// 	// This check prevents us from marking the infrastructure as not ready
+	// 	// when the internal guest might be rebooting or updating.
+	// 	if !machineHasKnownInternalIP(ctx.KubevirtMachine) {
+	// 		ctx.KubevirtMachine.Status.Ready = false
+	// 	}
+	// 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	// }
 
-	retryDuration, err := externalMachine.DrainNodeIfNeeded(r.WorkloadCluster)
-	if err != nil {
-		return ctrl.Result{RequeueAfter: retryDuration}, errors.Wrap(err, "failed to drain node")
-	}
-	if retryDuration > 0 {
-		return ctrl.Result{RequeueAfter: retryDuration}, nil
-	}
+	// Commenting out drain node for now to see if reconcilation is faster
+	// retryDuration, err := externalMachine.DrainNodeIfNeeded(r.WorkloadCluster)
+	// if err != nil {
+	// 	return ctrl.Result{RequeueAfter: retryDuration}, errors.Wrap(err, "failed to drain node")
+	// }
+	// if retryDuration > 0 {
+	// 	return ctrl.Result{RequeueAfter: retryDuration}, nil
+	// }
 
 	// Commenting out bootstrap check for now to see if reconcilation is faster
 	// if externalMachine.SupportsCheckingIsBootstrapped() && !conditions.IsTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition) {
@@ -324,24 +326,24 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	// 	ctx.Logger.Info("Underlying VM has boostrapped.")
 	// }
 
-	ctx.KubevirtMachine.Status.Addresses = []clusterv1.MachineAddress{
-		{
-			Type:    clusterv1.MachineHostName,
-			Address: ctx.KubevirtMachine.Name,
-		},
-		{
-			Type:    clusterv1.MachineInternalIP,
-			Address: ipAddress,
-		},
-		{
-			Type:    clusterv1.MachineExternalIP,
-			Address: ipAddress,
-		},
-		{
-			Type:    clusterv1.MachineInternalDNS,
-			Address: ctx.KubevirtMachine.Name,
-		},
-	}
+	// ctx.KubevirtMachine.Status.Addresses = []clusterv1.MachineAddress{
+	// 	{
+	// 		Type:    clusterv1.MachineHostName,
+	// 		Address: ctx.KubevirtMachine.Name,
+	// 	},
+	// 	{
+	// 		Type:    clusterv1.MachineInternalIP,
+	// 		Address: ipAddress,
+	// 	},
+	// 	{
+	// 		Type:    clusterv1.MachineExternalIP,
+	// 		Address: ipAddress,
+	// 	},
+	// 	{
+	// 		Type:    clusterv1.MachineInternalDNS,
+	// 		Address: ctx.KubevirtMachine.Name,
+	// 	},
+	// }
 
 	if ctx.KubevirtMachine.Spec.ProviderID == nil || *ctx.KubevirtMachine.Spec.ProviderID == "" {
 		providerID, err := externalMachine.GenerateProviderID()
