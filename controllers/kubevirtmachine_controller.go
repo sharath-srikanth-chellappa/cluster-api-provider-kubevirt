@@ -184,8 +184,10 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 	// Handle non-deleted machines
 	res, err := r.reconcileNormal(machineContext)
 	log.Info("Reconcile - 10")
+	log.Info(fmt.Sprintf("ReconcileNormal result: %v", res))
 
 	if err == nil && res.IsZero() {
+		log.Info("Reconcile - 10.5")
 		// Update the providerID on the Node
 		// The ProviderID on the Node and the providerID on  the KubevirtMachine are used to set the NodeRef
 		// This code is needed here as long as there is no Kubevirt cloud provider setting the providerID in the node
