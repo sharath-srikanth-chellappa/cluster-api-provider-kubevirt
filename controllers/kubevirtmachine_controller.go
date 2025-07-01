@@ -361,6 +361,10 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	// 	},
 	// }
 
+	// Update the condition BootstrapExecSucceededCondition since we are not exactly checking if the VM is bootstrapped
+	conditions.MarkTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition)
+	ctx.Logger.Info("Underlying VM has boostrapped.")
+
 	if ctx.KubevirtMachine.Spec.ProviderID == nil || *ctx.KubevirtMachine.Spec.ProviderID == "" {
 		providerID, err := externalMachine.GenerateProviderID()
 		if err != nil {
