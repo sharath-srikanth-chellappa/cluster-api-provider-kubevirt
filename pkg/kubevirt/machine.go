@@ -232,6 +232,11 @@ func (m *Machine) Address() string {
 	return ""
 }
 
+// Checks if the VM is running
+func (m *Machine) IsRunning() bool {
+	return m.vmiInstance != nil && m.vmiInstance.Status.Phase == kubevirtv1.Running
+}
+
 // IsReady checks if the VM is ready
 func (m *Machine) IsReady() bool {
 	return m.hasReadyCondition()

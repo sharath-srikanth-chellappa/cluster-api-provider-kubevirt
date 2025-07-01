@@ -23,6 +23,8 @@ type MachineInterface interface {
 	Delete() error
 	// Exists checks if the VM has been provisioned already.
 	Exists() bool
+	// IsRunning checks if the VM is running
+	IsRunning() bool
 	// IsReady checks if the VM is ready
 	IsReady() bool
 	// IsLiveMigratable reports back the live-migratability state of the VM: Status, Reason and Message
