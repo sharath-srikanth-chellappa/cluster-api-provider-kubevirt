@@ -233,9 +233,9 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		infraClusterMock    *infraclustermock.MockInfraCluster
 
 		machineFactoryMock *machinemocks.MockMachineFactory
-		machineMock        *machinemocks.MockMachineInterface
-		machineContext     *context.MachineContext
-		testLogger         = ctrl.Log.WithName("test")
+		// machineMock        *machinemocks.MockMachineInterface
+		machineContext *context.MachineContext
+		testLogger     = ctrl.Log.WithName("test")
 	)
 
 	BeforeEach(func() {
