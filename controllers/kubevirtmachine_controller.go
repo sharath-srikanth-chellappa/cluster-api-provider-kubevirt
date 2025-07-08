@@ -216,6 +216,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		return ctrl.Result{}, nil
 	}
 
+	ctx.Logger.Info("reconcileNormal - 1")
 	// Fetch SSH keys to be used for cluster nodes, and update bootstrap script cloud-init with public key
 	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
 
@@ -229,6 +230,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 			return ctrl.Result{}, errors.Wrap(err, "failed to fetch ssh keys for cluster nodes")
 		}
 	}
+	ctx.Logger.Info("reconcileNormal - 2")
 
 	// Default the infra cluster secret ref when the
 	// machine does not have one set.
@@ -236,10 +238,12 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Spec.InfraClusterSecretRef = ctx.KubevirtCluster.Spec.InfraClusterSecretRef
 	}
 
+	ctx.Logger.Info("reconcileNormal - 3")
 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
 	if err != nil {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to generate infra cluster client")
 	}
+	ctx.Logger.Info("reconcileNormal - 4")
 
 	// If there is not a namespace explicitly set on the vm template, then
 	// use the infra namespace as a default. For internal clusters, the infraNamespace
@@ -250,22 +254,26 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	if vmNamespace == "" {
 		vmNamespace = infraClusterNamespace
 	}
+	ctx.Logger.Info("reconcileNormal - 5")
 
 	if infraClusterClient == nil {
 		ctx.Logger.Info("Waiting for infra cluster client...")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
+	ctx.Logger.Info("reconcileNormal - 6")
 
 	if err := r.reconcileKubevirtBootstrapSecret(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys); err != nil {
 		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMProvisionedCondition, infrav1.WaitingForBootstrapDataReason, clusterv1.ConditionSeverityInfo, "Failed to fetch kubevirt bootstrap secret")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to fetch kubevirt bootstrap secret")
 	}
+	ctx.Logger.Info("reconcileNormal - 7")
 
 	// Create a helper for managing the KubeVirt VM hosting the machine.
 	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
 	}
+	ctx.Logger.Info("reconcileNormal - 8")
 
 	isTerminal, terminalReason, err := externalMachine.IsTerminal()
 	if err != nil {
@@ -276,6 +284,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Status.FailureReason = &failureErr
 		ctx.KubevirtMachine.Status.FailureMessage = &terminalReason
 	}
+	ctx.Logger.Info("reconcileNormal - 9")
 
 	// Provision the underlying VM if not existing
 	if !isTerminal && !externalMachine.Exists() {
@@ -287,6 +296,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.Logger.Info("VM Created, waiting on vm to be provisioned.")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
+	ctx.Logger.Info("reconcileNormal - 10")
 
 	// // Checks to see if a VM's active VMI is ready or not
 	// if externalMachine.IsReady() {
@@ -304,6 +314,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.Logger.Info("KubeVirt VM is not fully provisioned and running...")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
+	ctx.Logger.Info("reconcileNormal - 11")
 
 	// Commenting to check if the reconcilation is faster
 	// ipAddress := externalMachine.Address()
@@ -378,6 +389,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		// Set ProviderID so the Cluster API Machine Controller can pull it.
 		ctx.KubevirtMachine.Spec.ProviderID = &providerID
 	}
+	ctx.Logger.Info("reconcileNormal - 12")
 
 	// Ready should reflect if the VMI is ready or not
 	if externalMachine.IsRunning() {
@@ -385,6 +397,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	} else {
 		ctx.KubevirtMachine.Status.Ready = false
 	}
+	ctx.Logger.Info("reconcileNormal - 13")
 
 	// Commenting out live migration check for now to see if reconcilation is faster
 	// liveMigratable, reason, message, err := externalMachine.IsLiveMigratable()
@@ -434,6 +447,8 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
+	ctx.Logger.Info("updateNodeProviderID - 1")
+
 	// using workload cluster client, get the corresponding cluster node
 	workloadClusterNode := &corev1.Node{}
 	workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
@@ -445,6 +460,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
 		}
 	}
+	ctx.Logger.Info("updateNodeProviderID - 2")
 
 	// Create a helper for managing the KubeVirt VM hosting the machine.
 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
@@ -465,6 +481,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
+	ctx.Logger.Info("updateNodeProviderID - 3")
 
 	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
 	if err != nil {
@@ -486,6 +503,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	if err != nil {
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to serialize patch into json")
 	}
+	ctx.Logger.Info("updateNodeProviderID - 4")
 
 	// Patch node with provider id.
 	ctx.Logger.Info("Patching node with baremetal host label...")
@@ -502,6 +520,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		// Node is already updated, return
 		return ctrl.Result{}, nil
 	}
+	ctx.Logger.Info("updateNodeProviderID - 5")
 
 	// Patch node with provider id.
 	// Usually a cloud provider will do this, but there is no cloud provider for KubeVirt.
@@ -514,6 +533,8 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
 	}
 	ctx.KubevirtMachine.Status.NodeUpdated = true
+	ctx.Logger.Info("Node is patched with provider id and the NodeUpdated status is set to true")
+	ctx.Logger.Info("updateNodeProviderID - 6")
 
 	return ctrl.Result{}, nil
 }
