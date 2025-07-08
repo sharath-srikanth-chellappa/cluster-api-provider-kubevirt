@@ -461,6 +461,10 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		}
 	}
 	ctx.Logger.Info("updateNodeProviderID - 2")
+	if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
+		// Node is already updated, return
+		return ctrl.Result{}, nil
+	}
 
 	// Create a helper for managing the KubeVirt VM hosting the machine.
 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
@@ -508,17 +512,35 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	// Patch node with provider id.
 	ctx.Logger.Info("Patching node with baremetal host label...")
 
-	err = workloadClusterClient.Patch(ctx, workloadClusterNode, client.RawPatch(apitypes.JSONPatchType, serializedPatch))
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "API server returned not found error")
+	const maxRetries = 3
+	const retryDelay = 3 * time.Second
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err = workloadClusterClient.Patch(ctx, workloadClusterNode, client.RawPatch(apitypes.JSONPatchType, serializedPatch))
+		if err == nil {
+			// Success, break out of retry loop
+			break
 		}
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to patch worker cluster node")
+
+		// Log the attempt
+		ctx.Logger.Error(err, "patch attempt failed", "attempt", attempt, "maxRetries", maxRetries)
+
+		// If this was the last attempt, don't sleep
+		if attempt == maxRetries {
+			break
+		}
+
+		// Sleep before next attempt
+		time.Sleep(retryDelay)
 	}
 
-	if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
-		// Node is already updated, return
-		return ctrl.Result{}, nil
+	// Handle final error after all retries
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			ctx.Logger.Error(err, "API server returned not found error after all retries")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "API server returned not found error after retries")
+		}
+		ctx.Logger.Error(err, "failed to patch worker cluster node after all retries")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to patch worker cluster node after retries")
 	}
 	ctx.Logger.Info("updateNodeProviderID - 5")
 
