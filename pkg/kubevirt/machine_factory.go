@@ -31,6 +31,8 @@ type MachineInterface interface {
 	IsLiveMigratable() (bool, string, string, error)
 	// Address returns the IP address of the VM.
 	Address() string
+	// Node returns the Node which hosts the VM.
+	Node() string
 	// SupportsCheckingIsBootstrapped checks if we have a method of checking
 	// that this bootstrapper has completed.
 	SupportsCheckingIsBootstrapped() bool

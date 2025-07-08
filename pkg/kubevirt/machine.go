@@ -232,6 +232,15 @@ func (m *Machine) Address() string {
 	return ""
 }
 
+// Node returns the Node which hosts the VM.
+func (m *Machine) Node() string {
+	if m.vmiInstance != nil && m.vmiInstance.Status.NodeName != "" {
+		return m.vmiInstance.Status.NodeName
+	}
+
+	return ""
+}
+
 // Checks if the VM is running
 func (m *Machine) IsRunning() bool {
 	return m.vmiInstance != nil && m.vmiInstance.Status.Phase == kubevirtv1.Running
