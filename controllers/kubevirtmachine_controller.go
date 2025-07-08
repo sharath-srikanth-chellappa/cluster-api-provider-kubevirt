@@ -511,7 +511,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	err = workloadClusterClient.Patch(ctx, workloadClusterNode, client.RawPatch(apitypes.JSONPatchType, serializedPatch))
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "API server returned not found error")
 		}
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to patch worker cluster node")
 	}
