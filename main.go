@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"math/rand"
 	"os"
@@ -56,14 +57,16 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 
 	//flags.
-	metricsBindAddr      string
-	enableLeaderElection bool
-	syncPeriod           time.Duration
-	concurrency          int
-	healthAddr           string
-	webhookPort          int
-	webhookCertDir       string
-	watchNamespace       string
+	metricsBindAddr       string
+	metricsBindAddrFabric string
+	enableLeaderElection  bool
+	syncPeriod            time.Duration
+	concurrency           int
+	healthAddr            string
+	healthAddrFabric      string
+	webhookPort           int
+	webhookCertDir        string
+	watchNamespace        string
 )
 
 func init() {
@@ -91,6 +94,8 @@ func registerScheme() (*runtime.Scheme, error) {
 func initFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&metricsBindAddr, "metrics-bind-addr", "localhost:8080",
 		"The address the metric endpoint binds to.")
+	fs.StringVar(&metricsBindAddrFabric, "metrics-bind-addr-fabric", "localhost:8081",
+		"The address the metric endpoint binds to.")
 	fs.IntVar(&concurrency, "concurrency", 10,
 		"The number of machines to process simultaneously")
 	fs.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -98,6 +103,8 @@ func initFlags(fs *pflag.FlagSet) {
 	fs.DurationVar(&syncPeriod, "sync-period", 60*time.Second,
 		"The minimum interval at which watched resources are reconciled (e.g. 15m)")
 	fs.StringVar(&healthAddr, "health-addr", ":9440",
+		"The address the health endpoint binds to.")
+	fs.StringVar(&healthAddrFabric, "health-addr-fabric", ":9441",
 		"The address the health endpoint binds to.")
 	fs.IntVar(&webhookPort, "webhook-port", 9443,
 		"Webhook Server port")
@@ -150,19 +157,59 @@ func main() {
 		},
 		EventBroadcaster:       broadcaster,
 		HealthProbeBindAddress: healthAddr,
-		WebhookServer:          webhook.NewServer(webhook.Options{Port: webhookPort, CertDir: webhookCertDir}),
+		WebhookServer: webhook.NewServer(webhook.Options{
+			Port:    webhookPort,
+			CertDir: webhookCertDir,
+			TLSOpts: []func(*tls.Config){
+				func(t *tls.Config) {
+					t.MinVersion = tls.VersionTLS12
+				},
+			},
+		}),
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
+	fabricmgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme:           myscheme,
+		Metrics:          server.Options{BindAddress: metricsBindAddrFabric},
+		LeaderElection:   enableLeaderElection,
+		LeaderElectionID: "controller-leader-election-capk",
+		Cache: cache.Options{
+			SyncPeriod:        &syncPeriod,
+			DefaultNamespaces: defaultNamespaces,
+		},
+		HealthProbeBindAddress: healthAddrFabric,
+		WebhookServer: webhook.NewServer(webhook.Options{
+			Port: 10000,
+			TLSOpts: []func(*tls.Config){
+				func(t *tls.Config) {
+					t.MinVersion = tls.VersionTLS12
+				},
+			},
+		}),
+	})
+	if err != nil {
+		setupLog.Error(err, "unable to start manager for fabric cluster")
+		os.Exit(1)
+	}
+
 	// Setup the context that's going to be used in controllers and for the manager.
 	ctx := ctrl.SetupSignalHandler()
 
-	setupChecks(mgr)
-	setupReconcilers(ctx, mgr)
+	setupChecks(mgr, fabricmgr)
+	setupReconcilers(ctx, mgr, fabricmgr)
 	setupWebhooks(mgr)
+
+	go func() {
+		setupLog.Info("starting manager for fabric cluster")
+		if err := fabricmgr.Start(context.Background()); err != nil {
+			setupLog.Error(err, "problem running manager for fabric cluster")
+			os.Exit(1)
+		}
+	}()
 
 	// +kubebuilder:scaffold:builder
 	setupLog.Info("starting manager")
@@ -172,7 +219,7 @@ func main() {
 	}
 }
 
-func setupChecks(mgr ctrl.Manager) {
+func setupChecks(mgr ctrl.Manager, fabricmgr ctrl.Manager) {
 	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to create ready check")
 		os.Exit(1)
@@ -182,9 +229,19 @@ func setupChecks(mgr ctrl.Manager) {
 		setupLog.Error(err, "unable to create health check")
 		os.Exit(1)
 	}
+
+	if err := fabricmgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to create ready check for fabric cluster")
+		os.Exit(1)
+	}
+
+	if err := fabricmgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to create health check for fabric cluster")
+		os.Exit(1)
+	}
 }
 
-func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
+func setupReconcilers(ctx context.Context, mgr ctrl.Manager, fabricmgr ctrl.Manager) {
 	noCachedClient, err := k8sclient.New(mgr.GetConfig(), k8sclient.Options{Scheme: mgr.GetClient().Scheme()})
 	if err != nil {
 		setupLog.Error(err, "unable to create controller; failed to generate no-cached client")
@@ -193,7 +250,7 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 
 	if err := (&controllers.KubevirtMachineReconciler{
 		Client:          mgr.GetClient(),
-		InfraCluster:    infracluster.New(mgr.GetClient(), noCachedClient),
+		InfraCluster:    infracluster.New(fabricmgr.GetClient(), noCachedClient),
 		WorkloadCluster: workloadcluster.New(mgr.GetClient()),
 		MachineFactory:  kubevirt.DefaultMachineFactory{},
 	}).SetupWithManager(ctx, mgr, controller.Options{
@@ -206,7 +263,7 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 	if err := (&controllers.KubevirtClusterReconciler{
 		Client:       mgr.GetClient(),
 		APIReader:    mgr.GetAPIReader(),
-		InfraCluster: infracluster.New(mgr.GetClient(), noCachedClient),
+		InfraCluster: infracluster.New(fabricmgr.GetClient(), noCachedClient),
 		Log:          ctrl.Log.WithName("controllers").WithName("KubevirtCluster"),
 	}).SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "KubevirtCluster")
