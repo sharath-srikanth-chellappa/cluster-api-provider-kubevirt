@@ -176,7 +176,7 @@ func main() {
 		Scheme:           myscheme,
 		Metrics:          server.Options{BindAddress: metricsBindAddrFabric},
 		LeaderElection:   enableLeaderElection,
-		LeaderElectionID: "controller-leader-election-capk",
+		LeaderElectionID: "fabric-controller-leader-election-capk",
 		Cache: cache.Options{
 			SyncPeriod:        &syncPeriod,
 			DefaultNamespaces: defaultNamespaces,
