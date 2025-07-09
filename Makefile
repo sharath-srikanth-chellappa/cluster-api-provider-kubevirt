@@ -48,7 +48,7 @@ MAJOR_VER ?= 0
 MINOR_VER ?= 1
 PATCH_VER ?= 0
 VER_SUFFIX ?= -alpha
-TAG := $(MAJOR_VER).$(MINOR_VER).$(PATCH_VER)$(VER_SUFFIX)
+TAG ?= $(MAJOR_VER).$(MINOR_VER).$(PATCH_VER)$(VER_SUFFIX)
 
 # Local repository path for development
 export CAPKV_REPOSITORY := local-repository/infrastructure-kubevirt/v$(TAG)
