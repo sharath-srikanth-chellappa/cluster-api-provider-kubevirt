@@ -78,6 +78,8 @@ rules:
   verbs:
   - delete
   - get
+  - list
+  - watch
 - apiGroups:
   - kubevirt.io
   resources:
@@ -86,9 +88,9 @@ rules:
   - create
   - delete
   - get
+  - list
   - patch
   - update
-  - list
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io
