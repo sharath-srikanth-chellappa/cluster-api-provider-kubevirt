@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	apitypes "k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-	kubevirtv1 "kubevirt.io/api/core/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	capierrors "sigs.k8s.io/cluster-api/errors"
 	"sigs.k8s.io/cluster-api/util"
@@ -44,7 +43,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-kubevirt/api/v1alpha1"
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/context"
@@ -62,6 +63,8 @@ type KubevirtMachineReconciler struct {
 	WorkloadCluster workloadcluster.WorkloadCluster
 	MachineFactory  kubevirt.MachineFactory
 }
+
+var machineControllerChan = make(chan event.GenericEvent)
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kubevirtmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kubevirtmachines/status,verbs=get;update;patch
@@ -626,14 +629,14 @@ func (r *KubevirtMachineReconciler) SetupWithManager(goctx gocontext.Context, mg
 	if err != nil {
 		return err
 	}
+	eventSource := source.Channel(machineControllerChan, &handler.EnqueueRequestForObject{})
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrav1.KubevirtMachine{}).
 		WithOptions(options).
 		WithEventFilter(predicates.ResourceNotPaused(r.Scheme(), ctrl.LoggerFrom(goctx))).
-		Watches(
-			&kubevirtv1.VirtualMachine{},
-			handler.EnqueueRequestsFromMapFunc(util.MachineToInfrastructureMapFunc(kubevirtv1.VirtualMachineInstanceGroupVersionKind)),
+		WatchesRawSource(
+			eventSource,
 		).
 		Watches(
 			&clusterv1.Machine{},

@@ -269,6 +269,17 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager, fabricmgr ctrl.Mana
 		setupLog.Error(err, "unable to create controller", "controller", "KubevirtCluster")
 		os.Exit(1)
 	}
+
+	if err = (&controllers.KubevirtVirtualMachineReconciler{
+		Client: fabricmgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("VirtualMachine"),
+	}).SetupWithManager(ctx, fabricmgr, controller.Options{
+		MaxConcurrentReconciles: concurrency,
+	}); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
+		os.Exit(1)
+	}
+
 }
 
 func setupWebhooks(mgr ctrl.Manager) {
