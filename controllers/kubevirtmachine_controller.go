@@ -298,6 +298,8 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 			return ctrl.Result{}, errors.Wrap(err, "failed to create VM instance")
 		}
 		ctx.Logger.Info("VM Created, waiting on vm to be provisioned.")
+		start := time.Now()
+		ctx.Logger.Info("Start time: ", "start", start.Format(time.RFC3339))
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	ctx.Logger.Info("reconcileNormal - 10")
@@ -316,7 +318,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Status.Ready = false
 		ctx.Logger.Info(fmt.Sprintf("Reason that it is not fully provisioned: %s", reason))
 		ctx.Logger.Info("KubeVirt VM is not fully provisioned and running...")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
 	}
 	ctx.Logger.Info("reconcileNormal - 11")
 
@@ -383,6 +385,14 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	conditions.MarkTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition)
 	ctx.Logger.Info("Underlying VM has boostrapped.")
 
+	// Ready should reflect if the VMI is ready or not
+	if externalMachine.IsRunning() {
+		ctx.KubevirtMachine.Status.Ready = true
+	} else {
+		ctx.KubevirtMachine.Status.Ready = false
+	}
+	ctx.Logger.Info("reconcileNormal - 13")
+
 	if ctx.KubevirtMachine.Spec.ProviderID == nil || *ctx.KubevirtMachine.Spec.ProviderID == "" {
 		providerID, err := externalMachine.GenerateProviderID()
 		if err != nil {
@@ -395,13 +405,14 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	}
 	ctx.Logger.Info("reconcileNormal - 12")
 
-	// Ready should reflect if the VMI is ready or not
-	if externalMachine.IsRunning() {
-		ctx.KubevirtMachine.Status.Ready = true
-	} else {
-		ctx.KubevirtMachine.Status.Ready = false
-	}
-	ctx.Logger.Info("reconcileNormal - 13")
+	// // Trigger early NodeRef patch once we have ProviderID
+	// if !ctx.KubevirtMachine.Status.NodeUpdated {
+	// 	ctx.Logger.Info("Trying early node patch after VM is running")
+	// 	updateRes, updateErr := r.updateNodeProviderID(ctx)
+	// 	if updateErr != nil {
+	// 		return updateRes, updateErr
+	// 	}
+	// }
 
 	// Commenting out live migration check for now to see if reconcilation is faster
 	// liveMigratable, reason, message, err := externalMachine.IsLiveMigratable()
