@@ -93,6 +93,12 @@ rules:
   - update
   - watch
 - apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachines/status
+  verbs:
+  - get
+- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - rolebindings

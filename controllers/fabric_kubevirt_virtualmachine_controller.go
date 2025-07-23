@@ -102,10 +102,15 @@ func (r *KubevirtVirtualMachineReconciler) Reconcile(goctx gocontext.Context, re
 
 	capkvKubevirtMachine := &infrav1.KubevirtMachine{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: kvVirtualMachine.Labels[infrav1.CapKVMachineNamespaceLabel],
-			Name:      kvVirtualMachine.Labels[infrav1.CapKVMachineNameLabel],
+			Namespace: kvVirtualMachine.Labels[infrav1.KubevirtMachineNamespaceLabel],
+			Name:      kvVirtualMachine.Labels[infrav1.KubevirtMachineNameLabel],
 		},
 	}
+
+	log.Info("Emitting GenericEvent to machineControllerChan",
+		"namespace", capkvKubevirtMachine.Namespace,
+		"name", capkvKubevirtMachine.Name,
+	)
 
 	machineControllerChan <- event.GenericEvent{Object: capkvKubevirtMachine}
 
