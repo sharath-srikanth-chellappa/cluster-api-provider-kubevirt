@@ -59,6 +59,7 @@ import (
 // KubevirtMachineReconciler reconciles a KubevirtMachine object.
 type KubevirtMachineReconciler struct {
 	client.Client
+	DirectClient    client.Client
 	InfraCluster    infracluster.InfraCluster
 	WorkloadCluster workloadcluster.WorkloadCluster
 	MachineFactory  kubevirt.MachineFactory
@@ -80,7 +81,7 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 
 	// Fetch the KubevirtMachine instance.
 	kubevirtMachine := &infrav1.KubevirtMachine{}
-	if err := r.Client.Get(goctx, req.NamespacedName, kubevirtMachine); err != nil {
+	if err := r.DirectClient.Get(goctx, req.NamespacedName, kubevirtMachine); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
@@ -462,8 +463,6 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	ctx.Logger.Info("updateNodeProviderID - 1")
-
 	// using workload cluster client, get the corresponding cluster node
 	workloadClusterNode := &corev1.Node{}
 	workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
@@ -475,7 +474,6 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
 		}
 	}
-	ctx.Logger.Info("updateNodeProviderID - 2")
 	if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
 		// Node is already updated, return
 		return ctrl.Result{}, nil
@@ -500,7 +498,6 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
-	ctx.Logger.Info("updateNodeProviderID - 3")
 
 	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
 	if err != nil {
@@ -522,7 +519,6 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	if err != nil {
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to serialize patch into json")
 	}
-	ctx.Logger.Info("updateNodeProviderID - 4")
 
 	// Patch node with provider id.
 	ctx.Logger.Info("Patching node with baremetal host label...")
@@ -557,7 +553,6 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		ctx.Logger.Error(err, "failed to patch worker cluster node after all retries")
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to patch worker cluster node after retries")
 	}
-	ctx.Logger.Info("updateNodeProviderID - 5")
 
 	// Patch node with provider id.
 	// Usually a cloud provider will do this, but there is no cloud provider for KubeVirt.
@@ -571,7 +566,6 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	}
 	ctx.KubevirtMachine.Status.NodeUpdated = true
 	ctx.Logger.Info("Node is patched with provider id and the NodeUpdated status is set to true")
-	ctx.Logger.Info("updateNodeProviderID - 6")
 
 	return ctrl.Result{}, nil
 }

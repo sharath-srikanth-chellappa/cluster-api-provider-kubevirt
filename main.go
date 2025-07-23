@@ -250,6 +250,7 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager, fabricmgr ctrl.Mana
 
 	if err := (&controllers.KubevirtMachineReconciler{
 		Client:          mgr.GetClient(),
+		DirectClient:    noCachedClient,
 		InfraCluster:    infracluster.New(fabricmgr.GetClient(), noCachedClient),
 		WorkloadCluster: workloadcluster.New(mgr.GetClient()),
 		MachineFactory:  kubevirt.DefaultMachineFactory{},
