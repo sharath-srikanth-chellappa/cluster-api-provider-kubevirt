@@ -823,57 +823,117 @@ func (r *KubevirtMachineReconciler) KubevirtClusterToKubevirtMachines(ctx gocont
 	return result
 }
 
-// reconcileKubevirtBootstrapSecret creates bootstrap cloud-init secret for KubeVirt virtual machines
 func (r *KubevirtMachineReconciler) reconcileKubevirtBootstrapSecret(ctx *context.MachineContext, infraClusterClient client.Client, vmNamespace string, sshKeys *ssh.ClusterNodeSshKeys) error {
+
 	if ctx.Machine.Spec.Bootstrap.DataSecretName == nil {
 		return errors.New("error retrieving bootstrap data: linked Machine's bootstrap.dataSecretName is nil")
 	}
-
-	s := &corev1.Secret{}
-	key := client.ObjectKey{Namespace: ctx.Machine.GetNamespace(), Name: *ctx.Machine.Spec.Bootstrap.DataSecretName}
-	if err := r.Client.Get(ctx, key, s); err != nil {
-		return errors.Wrapf(err, "failed to retrieve bootstrap data secret for KubevirtMachine %s/%s", ctx.Machine.GetNamespace(), ctx.Machine.GetName())
-	}
-
-	value, ok := s.Data["value"]
-	if !ok {
-		return errors.New("error retrieving bootstrap data: secret value key is missing")
-	}
-
-	if sshKeys != nil {
-		var err error
-		var modified bool
-		if value, modified, err = addCapkUserToCloudInitConfig(value, sshKeys.PublicKey); err != nil {
-			return errors.Wrapf(err, "failed to add capk user to KubevirtMachine %s/%s userdata", ctx.Machine.GetNamespace(), ctx.Machine.GetName())
-		} else if modified {
-			ctx.Logger.Info("Add capk user with ssh config to bootstrap userdata")
-		}
-	}
-
-	newBootstrapDataSecret := &corev1.Secret{
+	bootstrapSecretName := fmt.Sprintf("%s-userdata", ctx.Machine.Name)
+	bootstrapSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      s.Name + "-userdata",
+			Name:      bootstrapSecretName,
 			Namespace: vmNamespace,
-			Labels:    s.Labels,
 		},
 	}
-	ctx.BootstrapDataSecret = newBootstrapDataSecret
 
-	_, err := controllerutil.CreateOrUpdate(ctx, infraClusterClient, newBootstrapDataSecret, func() error {
-		newBootstrapDataSecret.Type = clusterv1.ClusterSecretType
-		newBootstrapDataSecret.Data = map[string][]byte{
-			"userdata": value,
+	mutateFn := func() (err error) {
+		if bootstrapSecret.ObjectMeta.Labels != nil && bootstrapSecret.ObjectMeta.Labels[clusterv1.ClusterNameLabel] == ctx.Cluster.Name {
+			return nil
 		}
 
-		return nil
-	})
+		s := &corev1.Secret{}
+		key := client.ObjectKey{Namespace: ctx.Machine.GetNamespace(), Name: *ctx.Machine.Spec.Bootstrap.DataSecretName}
+		if err := r.Client.Get(ctx, key, s); err != nil {
+			return errors.Wrapf(err, "failed to retrieve bootstrap data secret for KubevirtMachine %s/%s", ctx.Machine.GetNamespace(), ctx.Machine.GetName())
+		}
 
+		bootstrapDataBytes, ok := s.Data["value"]
+		if !ok {
+			err := errors.New("error retrieving bootstrap data: secret value key is missing")
+			wrappedErr := errors.Wrap(err, "failed to fetch machine bootstrap data from CAPI")
+			return wrappedErr
+		}
+
+		bootstrapSecret.Data = map[string][]byte{
+			"userdata": bootstrapDataBytes,
+		}
+		if bootstrapSecret.ObjectMeta.Labels == nil {
+			bootstrapSecret.ObjectMeta.Labels = map[string]string{}
+		}
+		bootstrapSecret.ObjectMeta.Labels[clusterv1.ClusterNameLabel] = ctx.Cluster.Name
+
+		return nil
+	}
+
+	result, err := controllerutil.CreateOrUpdate(ctx, infraClusterClient, bootstrapSecret, mutateFn)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create kubevirt bootstrap secret for cluster")
+		return err
+	}
+
+	switch result {
+	case controllerutil.OperationResultCreated:
+		ctx.Logger.Info("Created bootstrap secret")
+	case controllerutil.OperationResultUpdated:
+		ctx.Logger.Info("Updated bootstrap secret")
+	case controllerutil.OperationResultNone:
+		fallthrough
+	default:
 	}
 
 	return nil
 }
+
+// // reconcileKubevirtBootstrapSecret creates bootstrap cloud-init secret for KubeVirt virtual machines
+// func (r *KubevirtMachineReconciler) reconcileKubevirtBootstrapSecret(ctx *context.MachineContext, infraClusterClient client.Client, vmNamespace string, sshKeys *ssh.ClusterNodeSshKeys) error {
+// 	if ctx.Machine.Spec.Bootstrap.DataSecretName == nil {
+// 		return errors.New("error retrieving bootstrap data: linked Machine's bootstrap.dataSecretName is nil")
+// 	}
+
+// 	s := &corev1.Secret{}
+// 	key := client.ObjectKey{Namespace: ctx.Machine.GetNamespace(), Name: *ctx.Machine.Spec.Bootstrap.DataSecretName}
+// 	if err := r.Client.Get(ctx, key, s); err != nil {
+// 		return errors.Wrapf(err, "failed to retrieve bootstrap data secret for KubevirtMachine %s/%s", ctx.Machine.GetNamespace(), ctx.Machine.GetName())
+// 	}
+
+// 	value, ok := s.Data["value"]
+// 	if !ok {
+// 		return errors.New("error retrieving bootstrap data: secret value key is missing")
+// 	}
+
+// 	if sshKeys != nil {
+// 		var err error
+// 		var modified bool
+// 		if value, modified, err = addCapkUserToCloudInitConfig(value, sshKeys.PublicKey); err != nil {
+// 			return errors.Wrapf(err, "failed to add capk user to KubevirtMachine %s/%s userdata", ctx.Machine.GetNamespace(), ctx.Machine.GetName())
+// 		} else if modified {
+// 			ctx.Logger.Info("Add capk user with ssh config to bootstrap userdata")
+// 		}
+// 	}
+
+// 	newBootstrapDataSecret := &corev1.Secret{
+// 		ObjectMeta: metav1.ObjectMeta{
+// 			Name:      s.Name + "-userdata",
+// 			Namespace: vmNamespace,
+// 			Labels:    s.Labels,
+// 		},
+// 	}
+// 	ctx.BootstrapDataSecret = newBootstrapDataSecret
+
+// 	_, err := controllerutil.CreateOrUpdate(ctx, infraClusterClient, newBootstrapDataSecret, func() error {
+// 		newBootstrapDataSecret.Type = clusterv1.ClusterSecretType
+// 		newBootstrapDataSecret.Data = map[string][]byte{
+// 			"userdata": value,
+// 		}
+
+// 		return nil
+// 	})
+
+// 	if err != nil {
+// 		return errors.Wrapf(err, "failed to create kubevirt bootstrap secret for cluster")
+// 	}
+
+// 	return nil
+// }
 
 // deleteKubevirtBootstrapSecret deletes bootstrap cloud-init secret for KubeVirt virtual machines
 func (r *KubevirtMachineReconciler) deleteKubevirtBootstrapSecret(ctx *context.MachineContext, infraClusterClient client.Client, vmNamespace string) error {
