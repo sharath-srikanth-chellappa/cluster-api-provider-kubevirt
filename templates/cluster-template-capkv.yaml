@@ -61,7 +61,7 @@ spec:
                 pvc:
                   name: ${OS_IMAGE_DATAVOLUME_PREFIX}${KUBERNETES_VERSION//./-}
                   namespace: ${CLUSTER_NAMESPACE}
-          runStrategy: Always
+          running: true
           template:
             spec:
               accessCredentials:
@@ -231,7 +231,7 @@ spec:
                 pvc:
                   name: ${OS_IMAGE_DATAVOLUME_PREFIX}${KUBERNETES_VERSION//./-}
                   namespace: ${CLUSTER_NAMESPACE}
-          runStrategy: Always
+          running: true
           template:
             spec:
               accessCredentials:
