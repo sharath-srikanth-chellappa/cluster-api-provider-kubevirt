@@ -471,21 +471,27 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
+	nodeList := &corev1.NodeList{}
+	if err := workloadClusterClient.List(ctx.ClusterContext(), nodeList); err != nil {
+		ctx.Logger.Info("Waiting for workload cluster client...")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
 	// using workload cluster client, get the corresponding cluster node
 	workloadClusterNode := &corev1.Node{}
-	workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
-	if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
-		if apierrors.IsNotFound(err) {
-			ctx.Logger.Info(fmt.Sprintf("Waiting for workload cluster node to appear for machine %s/%s...", ctx.KubevirtMachine.Namespace, ctx.KubevirtMachine.Name))
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		} else {
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
-		}
-	}
-	if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
-		// Node is already updated, return
-		return ctrl.Result{}, nil
-	}
+	// workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
+	// if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
+	// 	if apierrors.IsNotFound(err) {
+	// 		ctx.Logger.Info(fmt.Sprintf("Waiting for workload cluster node to appear for machine %s/%s...", ctx.KubevirtMachine.Namespace, ctx.KubevirtMachine.Name))
+	// 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// 	} else {
+	// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
+	// 	}
+	// }
+	// if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
+	// 	// Node is already updated, return
+	// 	return ctrl.Result{}, nil
+	// }
 
 	// Create a helper for managing the KubeVirt VM hosting the machine.
 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
