@@ -473,12 +473,16 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 
 	nodeList := &corev1.NodeList{}
 	if err := workloadClusterClient.List(ctx.ClusterContext(), nodeList); err != nil {
-		ctx.Logger.Info("Waiting for workload cluster client...")
+		ctx.Logger.Info("Waiting for workload cluster to list nodes...")
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// using workload cluster client, get the corresponding cluster node
-	workloadClusterNode := &corev1.Node{}
+	workloadClusterNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: ctx.Machine.Name,
+		},
+	}
 	// workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
 	// if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
 	// 	if apierrors.IsNotFound(err) {
