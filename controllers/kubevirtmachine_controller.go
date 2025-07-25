@@ -309,9 +309,21 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.Logger.Info("VM Created, waiting on vm to be provisioned.")
 		start := time.Now()
 		ctx.Logger.Info("Start time: ", "start", start.Format(time.RFC3339))
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{}, nil
 	}
 	ctx.Logger.Info("reconcileNormal - 10")
+
+	if ctx.KubevirtMachine.Spec.ProviderID == nil || *ctx.KubevirtMachine.Spec.ProviderID == "" {
+		providerID, err := externalMachine.GenerateProviderID()
+		if err != nil {
+			ctx.Logger.Error(err, "Failed to patch node with provider id.")
+			return ctrl.Result{}, nil
+		}
+
+		// Set ProviderID so the Cluster API Machine Controller can pull it.
+		ctx.KubevirtMachine.Spec.ProviderID = &providerID
+		ctx.Logger.Info("reconcileNormal - Set provider ID done")
+	}
 
 	// // Checks to see if a VM's active VMI is ready or not
 	// if externalMachine.IsReady() {
@@ -327,7 +339,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Status.Ready = false
 		ctx.Logger.Info(fmt.Sprintf("Reason that it is not fully provisioned: %s", reason))
 		ctx.Logger.Info("KubeVirt VM is not fully provisioned and running...")
-		return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
+		return ctrl.Result{}, nil
 	}
 	ctx.Logger.Info("reconcileNormal - 11")
 
@@ -401,18 +413,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Status.Ready = false
 	}
 	ctx.Logger.Info("reconcileNormal - 13")
-
-	if ctx.KubevirtMachine.Spec.ProviderID == nil || *ctx.KubevirtMachine.Spec.ProviderID == "" {
-		providerID, err := externalMachine.GenerateProviderID()
-		if err != nil {
-			ctx.Logger.Error(err, "Failed to patch node with provider id.")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-
-		// Set ProviderID so the Cluster API Machine Controller can pull it.
-		ctx.KubevirtMachine.Spec.ProviderID = &providerID
-	}
-	ctx.Logger.Info("reconcileNormal - 12")
 
 	// // Trigger early NodeRef patch once we have ProviderID
 	// if !ctx.KubevirtMachine.Status.NodeUpdated {
