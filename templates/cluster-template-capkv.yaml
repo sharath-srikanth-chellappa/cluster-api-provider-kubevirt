@@ -113,7 +113,7 @@ spec:
                   name: root
                 - name: cluster-sa-token
                   secret:
-                    secretName: capk-cluster-token
+                    secretName: capkv-cluster-token
               networks:
                 - name: default
                   pod: {}
@@ -283,7 +283,7 @@ spec:
                   name: root
                 - name: cluster-sa-token
                   secret:
-                    secretName: capk-cluster-token
+                    secretName: capkv-cluster-token
               networks:
                 - name: default
                   pod: {}
