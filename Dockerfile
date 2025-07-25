@@ -16,7 +16,7 @@
 
 # Build the manager binary
 # Run this with docker build --build-arg builder_image=<golang:x.y.z>
-ARG builder_image=docker.io/golang:1.24
+ARG builder_image=mcr.microsoft.com/azurelinux/base/core:3.0
 FROM ${builder_image} as builder
 WORKDIR /workspace
 
@@ -53,7 +53,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     -o manager .
 
 # Production image
-FROM gcr.io/distroless/static:nonroot
+FROM mcr.microsoft.com/azurelinux/base/core:3.0
 WORKDIR /
 COPY --from=builder /workspace/manager .
 # Use uid of nonroot user (65532) because kubernetes expects numeric user when applying pod security policies
