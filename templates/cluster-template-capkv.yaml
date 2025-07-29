@@ -85,8 +85,6 @@ spec:
                   model: host-passthrough
                   sockets: 1
                   threads: 1
-                memory:
-                  guest: 4Gi
                 devices:
                   disks:
                     - disk:
@@ -106,6 +104,13 @@ spec:
                   bootloader:
                     efi:
                       secureBoot: ${OS_IMAGE_USE_SECURE_BOOT:=false}
+                resources:
+                  limits:
+                    cpu: ${KUBEVIRT_CONTROL_PLANE_CORES}
+                    memory: ${KUBEVIRT_CONTROL_PLANE_MEMORY}
+                  requests:
+                    cpu: ${KUBEVIRT_CONTROL_PLANE_CORES}
+                    memory: ${KUBEVIRT_CONTROL_PLANE_MEMORY}
               evictionStrategy: External
               volumes:
                 - dataVolume:
@@ -267,8 +272,6 @@ spec:
                   interfaces:
                     - bridge: {}
                       name: default
-                memory:
-                  guest: 4Gi
                 features:
                   smm:
                     enabled: false
@@ -276,6 +279,13 @@ spec:
                   bootloader:
                     efi:
                       secureBoot: false
+                resources:
+                  limits:
+                    cpu: ${KUBEVIRT_WORKER_CORES}
+                    memory: ${KUBEVIRT_WORKER_MEMORY}
+                  requests:
+                    cpu: ${KUBEVIRT_WORKER_CORES}
+                    memory: ${KUBEVIRT_WORKER_MEMORY}
               evictionStrategy: External
               volumes:
                 - dataVolume:
