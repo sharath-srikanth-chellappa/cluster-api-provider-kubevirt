@@ -45,8 +45,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	kubevirtv1 "kubevirt.io/api/core/v1"
 	infrav1 "sigs.k8s.io/cluster-api-provider-kubevirt/api/v1alpha1"
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/context"
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/infracluster"
@@ -202,7 +204,7 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		if providerIdResult, providerIdErr := r.updateNodeProviderID(machineContext); providerIdErr != nil {
 			log.Info("Node provider ID update failed, will retry in next reconciliation", "error", providerIdErr)
 			log.Info("Node providerID update result: ", "result", providerIdResult)
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			return ctrl.Result{}, nil
 		} else if !providerIdResult.IsZero() {
 			// If updateNodeProviderID wants to requeue, respect that
 			return providerIdResult, nil
@@ -237,7 +239,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		clusterNodeSshKeys = ssh.NewClusterNodeSshKeys(ctx.ClusterContext(), r.Client)
 		if persisted := clusterNodeSshKeys.IsPersistedToSecret(); !persisted {
 			ctx.Logger.Info("Waiting for ssh keys data secret to be created by KubevirtCluster controller...")
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			return ctrl.Result{}, nil
 		}
 		if err := clusterNodeSshKeys.FetchPersistedKeysFromSecret(); err != nil {
 			return ctrl.Result{}, errors.Wrap(err, "failed to fetch ssh keys for cluster nodes")
@@ -271,13 +273,13 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 
 	if infraClusterClient == nil {
 		ctx.Logger.Info("Waiting for infra cluster client...")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{}, nil
 	}
 	// ctx.Logger.Info("reconcileNormal - 6")
 
 	if err := r.reconcileKubevirtBootstrapSecret(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys); err != nil {
 		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMProvisionedCondition, infrav1.WaitingForBootstrapDataReason, clusterv1.ConditionSeverityInfo, "Failed to fetch kubevirt bootstrap secret")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to fetch kubevirt bootstrap secret")
+		return ctrl.Result{}, errors.Wrap(err, "failed to fetch kubevirt bootstrap secret")
 	}
 	// ctx.Logger.Info("reconcileNormal - 7")
 
@@ -406,22 +408,26 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	conditions.MarkTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition)
 	ctx.Logger.Info("Underlying VM has boostrapped.")
 
-	// Ready should reflect if the VMI is ready or not
-	if externalMachine.IsRunning() {
-		ctx.KubevirtMachine.Status.Ready = true
-	} else {
-		ctx.KubevirtMachine.Status.Ready = false
+	// Update the conditions with the ones from the external machine
+	kubevirtVmConditions := externalMachine.GetConditions()
+	for i := range kubevirtVmConditions {
+		capicondition, err := convertKubeVirtVMConditionToCapiCondition(&kubevirtVmConditions[i])
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+
+		ctx.KubevirtMachine.Status.Conditions = append(ctx.KubevirtMachine.Status.Conditions, *capicondition)
 	}
 	ctx.Logger.Info("reconcileNormal - 13")
 
-	// // Trigger early NodeRef patch once we have ProviderID
-	// if !ctx.KubevirtMachine.Status.NodeUpdated {
-	// 	ctx.Logger.Info("Trying early node patch after VM is running")
-	// 	updateRes, updateErr := r.updateNodeProviderID(ctx)
-	// 	if updateErr != nil {
-	// 		return updateRes, updateErr
-	// 	}
-	// }
+	// Ready should reflect if the VMI is ready or not
+	if externalMachine.IsRunning() {
+		ctx.KubevirtMachine.Status.Ready = true
+		conditions.MarkTrue(ctx.KubevirtMachine, infrav1.VMRunningCondition)
+	} else {
+		ctx.KubevirtMachine.Status.Ready = false
+	}
+	ctx.Logger.Info("reconcileNormal - 14")
 
 	// Commenting out live migration check for now to see if reconcilation is faster
 	// liveMigratable, reason, message, err := externalMachine.IsLiveMigratable()
@@ -468,13 +474,14 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	}
 	if workloadClusterClient == nil {
 		ctx.Logger.Info("Waiting for workload cluster client...")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{}, nil
 	}
 
 	nodeList := &corev1.NodeList{}
 	if err := workloadClusterClient.List(ctx.ClusterContext(), nodeList); err != nil {
+		ctx.Logger.Error(err, "Failed to list nodes")
 		ctx.Logger.Info("Waiting for workload cluster to list nodes...")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{}, nil
 	}
 
 	// using workload cluster client, get the corresponding cluster node
@@ -500,7 +507,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	// Create a helper for managing the KubeVirt VM hosting the machine.
 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
 	if err != nil {
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to generate infra cluster client")
+		return ctrl.Result{}, errors.Wrap(err, "failed to generate infra cluster client")
 	}
 	// If there is not a namespace explicitly set on the vm template, then
 	// use the infra namespace as a default. For internal clusters, the infraNamespace
@@ -513,7 +520,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	}
 	if infraClusterClient == nil {
 		ctx.Logger.Info("Waiting for infra cluster client...")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{}, nil
 	}
 	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
 
@@ -524,7 +531,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 
 	vmiHostName := externalMachine.Node()
 	if vmiHostName == "" {
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.New("failed to get the hostname of the VM")
+		return ctrl.Result{}, errors.New("failed to get the hostname of the VM")
 	}
 
 	patch := []JSONPatchOp{{
@@ -535,41 +542,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 
 	serializedPatch, err := json.Marshal(patch)
 	if err != nil {
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to serialize patch into json")
-	}
-
-	// Patch node with provider id.
-	ctx.Logger.Info("Patching node with baremetal host label...")
-
-	const maxRetries = 3
-	const retryDelay = 3 * time.Second
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err = workloadClusterClient.Patch(ctx, workloadClusterNode, client.RawPatch(apitypes.JSONPatchType, serializedPatch))
-		if err == nil {
-			// Success, break out of retry loop
-			break
-		}
-
-		// Log the attempt
-		ctx.Logger.Error(err, "patch attempt failed", "attempt", attempt, "maxRetries", maxRetries)
-
-		// If this was the last attempt, don't sleep
-		if attempt == maxRetries {
-			break
-		}
-
-		// Sleep before next attempt
-		time.Sleep(retryDelay)
-	}
-
-	// Handle final error after all retries
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			ctx.Logger.Error(err, "API server returned not found error after all retries")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "API server returned not found error after retries")
-		}
-		ctx.Logger.Error(err, "failed to patch worker cluster node after all retries")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to patch worker cluster node after retries")
+		return ctrl.Result{}, errors.Wrap(err, "failed to serialize patch into json")
 	}
 
 	// Patch node with provider id.
@@ -580,12 +553,42 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	patchStr := fmt.Sprintf(`{"spec": {"providerID": "%s"}}`, *ctx.KubevirtMachine.Spec.ProviderID)
 	mergePatch := client.RawPatch(types.MergePatchType, []byte(patchStr))
 	if err := workloadClusterClient.Patch(ctx, workloadClusterNode, mergePatch); err != nil {
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
+		if apierrors.IsNotFound(err) {
+			ctx.Logger.Error(err, "API server returned not found")
+			return ctrl.Result{}, errors.Wrap(err, "API server returned not found")
+		}
+		return ctrl.Result{}, errors.Wrapf(err, "failed to patch workload cluster node")
 	}
 	ctx.KubevirtMachine.Status.NodeUpdated = true
+
+	// Patch node with baremetal host label.
+	ctx.Logger.Info("Patching node with baremetal host label...")
+
+	// Handle final error after all retries
+	err = workloadClusterClient.Patch(ctx, workloadClusterNode, client.RawPatch(apitypes.JSONPatchType, serializedPatch))
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			ctx.Logger.Error(err, "API server returned not found")
+			return ctrl.Result{}, errors.Wrap(err, "API server returned not found")
+		}
+		ctx.Logger.Error(err, "failed to patch worker cluster node")
+		return ctrl.Result{}, errors.Wrap(err, "failed to patch worker cluster node")
+	}
+
 	ctx.Logger.Info("Node is patched with provider id and the NodeUpdated status is set to true")
 
 	return ctrl.Result{}, nil
+}
+
+func convertKubeVirtVMConditionToCapiCondition(kvcondition *kubevirtv1.VirtualMachineCondition) (*clusterv1.Condition, error) {
+	capicondition := clusterv1.Condition{
+		Type:               clusterv1.ConditionType(kvcondition.Type),
+		Status:             kvcondition.Status,
+		LastTransitionTime: kvcondition.LastTransitionTime,
+		Reason:             kvcondition.Reason,
+		Message:            kvcondition.Message,
+	}
+	return &capicondition, nil
 }
 
 // Commenting out this code to propose an alternative reconcilation flow

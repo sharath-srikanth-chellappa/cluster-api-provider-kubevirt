@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/context"
@@ -42,6 +43,8 @@ type MachineInterface interface {
 	GenerateProviderID() (string, error)
 	// IsTerminal reports back if a VM is in a permanent terminal state
 	IsTerminal() (bool, string, error)
+	// GetCondtions returns the conditions of the VM
+	GetConditions() []kubevirtv1.VirtualMachineCondition
 
 	DrainNodeIfNeeded(workloadcluster.WorkloadCluster) (time.Duration, error)
 

@@ -59,7 +59,7 @@ spec:
                 volumeMode: Filesystem
               source:
                 pvc:
-                  name: ${OS_IMAGE_DATAVOLUME_PREFIX}${KUBERNETES_VERSION//./-}
+                  name: ${OS_IMAGE_DATAVOLUME_PREFIX}
                   namespace: ${CLUSTER_NAMESPACE}
           running: true
           template:
@@ -86,7 +86,7 @@ spec:
                   sockets: 1
                   threads: 1
                 memory:
-                  guest: 7Gi
+                  guest: 4Gi
                 devices:
                   disks:
                     - disk:
@@ -229,7 +229,7 @@ spec:
                 volumeMode: Filesystem
               source:
                 pvc:
-                  name: ${OS_IMAGE_DATAVOLUME_PREFIX}${KUBERNETES_VERSION//./-}
+                  name: ${OS_IMAGE_DATAVOLUME_PREFIX}
                   namespace: ${CLUSTER_NAMESPACE}
           running: true
           template:
@@ -268,7 +268,7 @@ spec:
                     - bridge: {}
                       name: default
                 memory:
-                  guest: 7Gi
+                  guest: 4Gi
                 features:
                   smm:
                     enabled: false

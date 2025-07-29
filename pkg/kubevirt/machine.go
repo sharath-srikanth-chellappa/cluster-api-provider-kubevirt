@@ -243,7 +243,24 @@ func (m *Machine) Node() string {
 
 // Checks if the VM is running
 func (m *Machine) IsRunning() bool {
-	return m.vmiInstance != nil && m.vmiInstance.Status.Phase == kubevirtv1.Running
+	if m.vmInstance == nil {
+		return false
+	}
+
+	// Check if VMI is running AND guest agent is connected
+	if m.vmiInstance.Status.Phase != kubevirtv1.Running {
+		return false
+	}
+
+	// Check for guest agent connectivity
+	for _, cond := range m.vmiInstance.Status.Conditions {
+		if cond.Type == kubevirtv1.VirtualMachineInstanceAgentConnected &&
+			cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+
+	return false
 }
 
 // IsReady checks if the VM is ready
@@ -269,6 +286,11 @@ func (m *Machine) IsLiveMigratable() (bool, string, string, error) {
 
 	return false, "", "", fmt.Errorf("%s VMI does not have a %s condition",
 		m.vmiInstance.Status.Phase, kubevirtv1.VirtualMachineInstanceIsMigratable)
+}
+
+// GetConditions returns the VM conditions
+func (m *Machine) GetConditions() []kubevirtv1.VirtualMachineCondition {
+	return m.vmInstance.Status.Conditions
 }
 
 const (

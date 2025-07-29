@@ -18,7 +18,9 @@ package kubevirt
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtv1 "kubevirt.io/api/core/v1"
@@ -30,6 +32,32 @@ import (
 
 type CommandExecutor interface {
 	ExecuteCommand(command string) (string, error)
+}
+
+// append the kubernetes version to the source pvc name (if using a PVC) to pick the right OS
+// image
+// using the infra machine spec as a source to ensure the version is appended
+// only once
+func patchRootDVSourcePVCName(dataVolumeTemplatesTemplate []kubevirtv1.DataVolumeTemplateSpec, vm *kubevirtv1.VirtualMachine, version string) error {
+	for _, dvt := range vm.Spec.DataVolumeTemplates {
+		if dvt.Name != "root" {
+			continue
+		}
+		// Find the corresponding template to get the base PVC name
+		for _, dvtSource := range dataVolumeTemplatesTemplate {
+			if dvtSource.Name != "root" {
+				continue
+			}
+			// Check if the source here is PVC and if it is, append the version.
+			// The reason for this check that the source can be a registry image or a PVC.
+			if dvt.Spec.Source.PVC != nil {
+				dvt.Spec.Source.PVC.Name = dvtSource.Spec.Source.PVC.Name + strings.ReplaceAll(version, ".", "-")
+			}
+			return nil
+		}
+	}
+
+	return errors.Errorf("root DataVolumeTemplate not found")
 }
 
 // prefixDataVolumeTemplates adds a prefix to all DataVolumeTemplates and
@@ -99,6 +127,18 @@ func newVirtualMachineFromKubevirtMachine(ctx *context.MachineContext, namespace
 	virtualMachine.ObjectMeta.Labels["cluster.x-k8s.io/role"] = nodeRole(ctx)
 	virtualMachine.ObjectMeta.Labels["cluster.x-k8s.io/cluster-name"] = ctx.Cluster.Name
 
+	// NEW: Patch root DataVolume source PVC name based on Kubernetes version for faster cloning
+	if ctx.Machine.Spec.Version != nil {
+		err := patchRootDVSourcePVCName(
+			ctx.KubevirtMachine.Spec.VirtualMachineTemplate.Spec.DataVolumeTemplates,
+			virtualMachine,
+			*ctx.Machine.Spec.Version,
+		)
+		if err != nil {
+			// Log error but continue - fallback to original behavior
+			ctx.Logger.Error(err, "Failed to patch root DataVolume source PVC name, falling back to original source")
+		}
+	}
 	// make each datavolume unique by appending machine name as a prefix
 	virtualMachine = prefixDataVolumeTemplates(virtualMachine, ctx.KubevirtMachine.Name)
 
