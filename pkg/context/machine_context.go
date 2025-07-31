@@ -64,11 +64,7 @@ func (c *MachineContext) PatchKubevirtMachine(patchHelper *patch.Helper) error {
 	conditions.SetSummary(c.KubevirtMachine,
 		conditions.WithConditions(
 			infrav1.VMProvisionedCondition,
-			infrav1.VMRunningCondition,
 			infrav1.BootstrapExecSucceededCondition,
-		),
-		conditions.WithStepCounterIfOnly(
-			infrav1.VMRunningCondition,
 		),
 	)
 
@@ -78,7 +74,6 @@ func (c *MachineContext) PatchKubevirtMachine(patchHelper *patch.Helper) error {
 		c.KubevirtMachine,
 		patch.WithOwnedConditions{Conditions: []clusterv1.ConditionType{
 			clusterv1.ReadyCondition,
-			infrav1.VMRunningCondition,
 			infrav1.VMProvisionedCondition,
 			infrav1.BootstrapExecSucceededCondition,
 		}},

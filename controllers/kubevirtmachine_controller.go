@@ -346,68 +346,61 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	}
 	ctx.Logger.Info("reconcileNormal - 11")
 
-	// Commenting to check if the reconcilation is faster
-	// ipAddress := externalMachine.Address()
-	// if ipAddress == "" {
-	// 	ctx.Logger.Info(fmt.Sprintf("KubevirtMachine %s: Got empty ipAddress, requeue", ctx.KubevirtMachine.Name))
-	// 	// Only set readiness to false if we have never detected an internal IP for this machine.
-	// 	//
-	// 	// The internal ipAddress is sometimes detected via the qemu guest agent,
-	// 	// which will report an empty addr at some points when the guest is rebooting
-	// 	// or updating.
-	// 	//
-	// 	// This check prevents us from marking the infrastructure as not ready
-	// 	// when the internal guest might be rebooting or updating.
-	// 	if !machineHasKnownInternalIP(ctx.KubevirtMachine) {
-	// 		ctx.KubevirtMachine.Status.Ready = false
-	// 	}
-	// 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	// }
+	ipAddress := externalMachine.Address()
+	if ipAddress == "" {
+		ctx.Logger.Info(fmt.Sprintf("KubevirtMachine %s: Got empty ipAddress, requeue", ctx.KubevirtMachine.Name))
+		// Only set readiness to false if we have never detected an internal IP for this machine.
+		//
+		// The internal ipAddress is sometimes detected via the qemu guest agent,
+		// which will report an empty addr at some points when the guest is rebooting
+		// or updating.
+		//
+		// This check prevents us from marking the infrastructure as not ready
+		// when the internal guest might be rebooting or updating.
+		if !machineHasKnownInternalIP(ctx.KubevirtMachine) {
+			ctx.KubevirtMachine.Status.Ready = false
+		}
+		return ctrl.Result{}, nil
+	}
 
-	// Commenting out drain node for now to see if reconcilation is faster
-	// retryDuration, err := externalMachine.DrainNodeIfNeeded(r.WorkloadCluster)
-	// if err != nil {
-	// 	return ctrl.Result{RequeueAfter: retryDuration}, errors.Wrap(err, "failed to drain node")
-	// }
-	// if retryDuration > 0 {
-	// 	return ctrl.Result{RequeueAfter: retryDuration}, nil
-	// }
+	retryDuration, err := externalMachine.DrainNodeIfNeeded(r.WorkloadCluster)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: retryDuration}, errors.Wrap(err, "failed to drain node")
+	}
+	if retryDuration > 0 {
+		return ctrl.Result{}, nil
+	}
 
-	// Commenting out bootstrap check for now to see if reconcilation is faster
-	// if externalMachine.SupportsCheckingIsBootstrapped() && !conditions.IsTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition) {
-	// 	if !externalMachine.IsBootstrapped() {
-	// 		ctx.Logger.Info("Waiting for underlying VM to bootstrap...")
-	// 		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition, infrav1.BootstrapFailedReason, clusterv1.ConditionSeverityWarning, "VM not bootstrapped yet")
-	// 		ctx.KubevirtMachine.Status.Ready = false
-	// 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	// 	}
-	// 	// Update the condition BootstrapExecSucceededCondition
-	// 	conditions.MarkTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition)
-	// 	ctx.Logger.Info("Underlying VM has boostrapped.")
-	// }
+	if externalMachine.SupportsCheckingIsBootstrapped() && !conditions.IsTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition) {
+		if !externalMachine.IsBootstrapped() {
+			ctx.Logger.Info("Waiting for underlying VM to bootstrap...")
+			conditions.MarkFalse(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition, infrav1.BootstrapFailedReason, clusterv1.ConditionSeverityWarning, "VM not bootstrapped yet")
+			ctx.KubevirtMachine.Status.Ready = false
+			return ctrl.Result{}, nil
+		}
+		// Update the condition BootstrapExecSucceededCondition
+		conditions.MarkTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition)
+		ctx.Logger.Info("Underlying VM has boostrapped.")
+	}
 
-	// ctx.KubevirtMachine.Status.Addresses = []clusterv1.MachineAddress{
-	// 	{
-	// 		Type:    clusterv1.MachineHostName,
-	// 		Address: ctx.KubevirtMachine.Name,
-	// 	},
-	// 	{
-	// 		Type:    clusterv1.MachineInternalIP,
-	// 		Address: ipAddress,
-	// 	},
-	// 	{
-	// 		Type:    clusterv1.MachineExternalIP,
-	// 		Address: ipAddress,
-	// 	},
-	// 	{
-	// 		Type:    clusterv1.MachineInternalDNS,
-	// 		Address: ctx.KubevirtMachine.Name,
-	// 	},
-	// }
-
-	// Update the condition BootstrapExecSucceededCondition since we are not exactly checking if the VM is bootstrapped
-	conditions.MarkTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition)
-	ctx.Logger.Info("Underlying VM has boostrapped.")
+	ctx.KubevirtMachine.Status.Addresses = []clusterv1.MachineAddress{
+		{
+			Type:    clusterv1.MachineHostName,
+			Address: ctx.KubevirtMachine.Name,
+		},
+		{
+			Type:    clusterv1.MachineInternalIP,
+			Address: ipAddress,
+		},
+		{
+			Type:    clusterv1.MachineExternalIP,
+			Address: ipAddress,
+		},
+		{
+			Type:    clusterv1.MachineInternalDNS,
+			Address: ctx.KubevirtMachine.Name,
+		},
+	}
 
 	// Update the conditions with the ones from the external machine
 	kubevirtVmConditions := externalMachine.GetConditions()
@@ -424,26 +417,24 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	// Ready should reflect if the VMI is ready or not
 	if externalMachine.IsRunning() {
 		ctx.KubevirtMachine.Status.Ready = true
-		conditions.MarkTrue(ctx.KubevirtMachine, infrav1.VMRunningCondition)
 	} else {
 		ctx.KubevirtMachine.Status.Ready = false
 	}
 	ctx.Logger.Info("reconcileNormal - 14")
 
-	// Commenting out live migration check for now to see if reconcilation is faster
-	// liveMigratable, reason, message, err := externalMachine.IsLiveMigratable()
-	// if err != nil {
-	// 	ctx.Logger.Error(err, fmt.Sprintf("failed to get the %s condition of %s machine",
-	// 		infrav1.VMLiveMigratableCondition, ctx.KubevirtMachine.Name))
-	// 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	// }
-	// if liveMigratable {
-	// 	// Mark VMLiveMigratableCondition to indicate whether the VM can be live migrated or not
-	// 	conditions.MarkTrue(ctx.KubevirtMachine, infrav1.VMLiveMigratableCondition)
-	// } else {
-	// 	conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMLiveMigratableCondition, reason, clusterv1.ConditionSeverityInfo,
-	// 		"%s is not a live migratable machine: %s", ctx.KubevirtMachine.Name, message)
-	// }
+	liveMigratable, reason, message, err := externalMachine.IsLiveMigratable()
+	if err != nil {
+		ctx.Logger.Error(err, fmt.Sprintf("failed to get the %s condition of %s machine",
+			infrav1.VMLiveMigratableCondition, ctx.KubevirtMachine.Name))
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+	if liveMigratable {
+		// Mark VMLiveMigratableCondition to indicate whether the VM can be live migrated or not
+		conditions.MarkTrue(ctx.KubevirtMachine, infrav1.VMLiveMigratableCondition)
+	} else {
+		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMLiveMigratableCondition, reason, clusterv1.ConditionSeverityInfo,
+			"%s is not a live migratable machine: %s", ctx.KubevirtMachine.Name, message)
+	}
 
 	return ctrl.Result{}, nil
 }
