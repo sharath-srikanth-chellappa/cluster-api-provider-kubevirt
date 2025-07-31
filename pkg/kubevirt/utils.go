@@ -23,6 +23,7 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/kind/pkg/cluster/constants"
@@ -182,7 +183,7 @@ func buildVirtualMachineInstanceTemplate(ctx *context.MachineContext) *kubevirtv
 	cloudInitVolume := kubevirtv1.Volume{
 		Name: cloudInitVolumeName,
 		VolumeSource: kubevirtv1.VolumeSource{
-			CloudInitConfigDrive: &kubevirtv1.CloudInitConfigDriveSource{
+			CloudInitNoCloud: &kubevirtv1.CloudInitNoCloudSource{
 				UserDataSecretRef: &corev1.LocalObjectReference{
 					Name: *ctx.Machine.Spec.Bootstrap.DataSecretName + "-userdata",
 				},
@@ -200,6 +201,23 @@ func buildVirtualMachineInstanceTemplate(ctx *context.MachineContext) *kubevirtv
 		},
 	}
 	template.Spec.Domain.Devices.Disks = append(template.Spec.Domain.Devices.Disks, cloudInitDisk)
+
+	if ctx.KubevirtCluster.Spec.ControlPlaneServiceTemplate.Spec.Type == corev1.ServiceTypeClusterIP ||
+		ctx.KubevirtCluster.Spec.ControlPlaneServiceTemplate.Spec.Type == corev1.ServiceTypeLoadBalancer ||
+		ctx.KubevirtCluster.Spec.ControlPlaneServiceTemplate.Spec.Type == corev1.ServiceTypeNodePort {
+		if util.IsControlPlaneMachine(ctx.Machine) && template.Spec.ReadinessProbe == nil {
+			template.Spec.ReadinessProbe = &kubevirtv1.Probe{
+				Handler: kubevirtv1.Handler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Scheme: corev1.URISchemeHTTPS,
+						Port:   intstr.FromInt(6443),
+						Path:   "/readyz",
+					},
+				},
+				PeriodSeconds: 10,
+			}
+		}
+	}
 
 	return template
 }

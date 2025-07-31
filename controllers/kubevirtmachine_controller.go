@@ -34,7 +34,6 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	capierrors "sigs.k8s.io/cluster-api/errors"
 	"sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
@@ -235,16 +234,16 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	// Fetch SSH keys to be used for cluster nodes, and update bootstrap script cloud-init with public key
 	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
 
-	if !annotations.IsExternallyManaged(ctx.KubevirtCluster) {
-		clusterNodeSshKeys = ssh.NewClusterNodeSshKeys(ctx.ClusterContext(), r.Client)
-		if persisted := clusterNodeSshKeys.IsPersistedToSecret(); !persisted {
-			ctx.Logger.Info("Waiting for ssh keys data secret to be created by KubevirtCluster controller...")
-			return ctrl.Result{}, nil
-		}
-		if err := clusterNodeSshKeys.FetchPersistedKeysFromSecret(); err != nil {
-			return ctrl.Result{}, errors.Wrap(err, "failed to fetch ssh keys for cluster nodes")
-		}
-	}
+	// if !annotations.IsExternallyManaged(ctx.KubevirtCluster) {
+	// 	clusterNodeSshKeys = ssh.NewClusterNodeSshKeys(ctx.ClusterContext(), r.Client)
+	// 	if persisted := clusterNodeSshKeys.IsPersistedToSecret(); !persisted {
+	// 		ctx.Logger.Info("Waiting for ssh keys data secret to be created by KubevirtCluster controller...")
+	// 		return ctrl.Result{}, nil
+	// 	}
+	// 	if err := clusterNodeSshKeys.FetchPersistedKeysFromSecret(); err != nil {
+	// 		return ctrl.Result{}, errors.Wrap(err, "failed to fetch ssh keys for cluster nodes")
+	// 	}
+	// }
 	// ctx.Logger.Info("reconcileNormal - 2")
 
 	// Default the infra cluster secret ref when the
@@ -284,7 +283,8 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	// ctx.Logger.Info("reconcileNormal - 7")
 
 	// Create a helper for managing the KubeVirt VM hosting the machine.
-	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
+	// externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
+	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, nil)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
 	}

@@ -25,7 +25,6 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -45,7 +44,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/context"
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/infracluster"
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/loadbalancer"
-	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/ssh"
 )
 
 // KubevirtClusterReconciler reconciles a KubevirtCluster object.
@@ -203,27 +201,28 @@ func (r *KubevirtClusterReconciler) reconcileNormal(ctx *context.ClusterContext,
 
 	conditions.MarkTrue(ctx.KubevirtCluster, infrav1.LoadBalancerAvailableCondition)
 
-	// Generate ssh keys for cluster nodes, and persist them to a secret
-	clusterNodeSSHKeys := ssh.NewClusterNodeSshKeys(ctx, r.Client)
-	if !clusterNodeSSHKeys.IsPersistedToSecret() {
-		if err := clusterNodeSSHKeys.GenerateNewKeys(); err != nil {
-			return ctrl.Result{}, errors.Wrap(err, "failed to generate new ssh keys")
-		}
-		if sshKeysDataSecret, err := clusterNodeSSHKeys.PersistKeysToSecret(); err != nil {
-			return ctrl.Result{}, errors.Wrap(err, "failed to persist ssh keys to secret")
-		} else {
-			ctx.KubevirtCluster.Spec.SshKeys = infrav1.SSHKeys{
-				ConfigRef: &corev1.ObjectReference{
-					APIVersion: sshKeysDataSecret.APIVersion,
-					Kind:       sshKeysDataSecret.Kind,
-					Name:       sshKeysDataSecret.Name,
-					Namespace:  sshKeysDataSecret.Namespace,
-					UID:        sshKeysDataSecret.UID,
-				},
-				DataSecretName: &sshKeysDataSecret.Name,
-			}
-		}
-	}
+	// Commenting out SSH key generation for now, to see if that makes the cluster creation work faster.
+	// // Generate ssh keys for cluster nodes, and persist them to a secret
+	// clusterNodeSSHKeys := ssh.NewClusterNodeSshKeys(ctx, r.Client)
+	// if !clusterNodeSSHKeys.IsPersistedToSecret() {
+	// 	if err := clusterNodeSSHKeys.GenerateNewKeys(); err != nil {
+	// 		return ctrl.Result{}, errors.Wrap(err, "failed to generate new ssh keys")
+	// 	}
+	// 	if sshKeysDataSecret, err := clusterNodeSSHKeys.PersistKeysToSecret(); err != nil {
+	// 		return ctrl.Result{}, errors.Wrap(err, "failed to persist ssh keys to secret")
+	// 	} else {
+	// 		ctx.KubevirtCluster.Spec.SshKeys = infrav1.SSHKeys{
+	// 			ConfigRef: &corev1.ObjectReference{
+	// 				APIVersion: sshKeysDataSecret.APIVersion,
+	// 				Kind:       sshKeysDataSecret.Kind,
+	// 				Name:       sshKeysDataSecret.Name,
+	// 				Namespace:  sshKeysDataSecret.Namespace,
+	// 				UID:        sshKeysDataSecret.UID,
+	// 			},
+	// 			DataSecretName: &sshKeysDataSecret.Name,
+	// 		}
+	// 	}
+	// }
 
 	// Mark the KubevirtCluster ready
 	ctx.KubevirtCluster.Status.Ready = true

@@ -261,6 +261,7 @@ spec:
                   sockets: 1
                   threads: 1
                 devices:
+                  autoattachGraphicsDevice: false
                   disks:
                     - disk:
                         bus: virtio
