@@ -239,7 +239,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		clusterNodeSshKeys = ssh.NewClusterNodeSshKeys(ctx.ClusterContext(), r.Client)
 		if persisted := clusterNodeSshKeys.IsPersistedToSecret(); !persisted {
 			ctx.Logger.Info("Waiting for ssh keys data secret to be created by KubevirtCluster controller...")
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 		if err := clusterNodeSshKeys.FetchPersistedKeysFromSecret(); err != nil {
 			return ctrl.Result{}, errors.Wrap(err, "failed to fetch ssh keys for cluster nodes")
@@ -256,7 +256,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	// ctx.Logger.Info("reconcileNormal - 3")
 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
 	if err != nil {
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to generate infra cluster client")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to generate infra cluster client")
 	}
 	// ctx.Logger.Info("reconcileNormal - 4")
 
@@ -273,7 +273,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 
 	if infraClusterClient == nil {
 		ctx.Logger.Info("Waiting for infra cluster client...")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	// ctx.Logger.Info("reconcileNormal - 6")
 
@@ -285,7 +285,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 
 	// Create a helper for managing the KubeVirt VM hosting the machine.
 	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
-	// externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, nil)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
 	}
@@ -312,7 +311,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.Logger.Info("VM Created, waiting on vm to be provisioned.")
 		start := time.Now()
 		ctx.Logger.Info("Start time: ", "start", start.Format(time.RFC3339))
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 	}
 	ctx.Logger.Info("reconcileNormal - 10")
 
@@ -342,7 +341,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Status.Ready = false
 		ctx.Logger.Info(fmt.Sprintf("Reason that it is not fully provisioned: %s", reason))
 		ctx.Logger.Info("KubeVirt VM is not fully provisioned and running...")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 	}
 	ctx.Logger.Info("reconcileNormal - 11")
 
@@ -360,7 +359,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		if !machineHasKnownInternalIP(ctx.KubevirtMachine) {
 			ctx.KubevirtMachine.Status.Ready = false
 		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 	}
 
 	retryDuration, err := externalMachine.DrainNodeIfNeeded(r.WorkloadCluster)
@@ -368,7 +367,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		return ctrl.Result{RequeueAfter: retryDuration}, errors.Wrap(err, "failed to drain node")
 	}
 	if retryDuration > 0 {
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: retryDuration}, nil
 	}
 
 	if externalMachine.SupportsCheckingIsBootstrapped() && !conditions.IsTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition) {
@@ -376,7 +375,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 			ctx.Logger.Info("Waiting for underlying VM to bootstrap...")
 			conditions.MarkFalse(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition, infrav1.BootstrapFailedReason, clusterv1.ConditionSeverityWarning, "VM not bootstrapped yet")
 			ctx.KubevirtMachine.Status.Ready = false
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 		// Update the condition BootstrapExecSucceededCondition
 		conditions.MarkTrue(ctx.KubevirtMachine, infrav1.BootstrapExecSucceededCondition)
