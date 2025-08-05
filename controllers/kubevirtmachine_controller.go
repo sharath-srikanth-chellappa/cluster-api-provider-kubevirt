@@ -864,6 +864,10 @@ func (r *KubevirtMachineReconciler) reconcileKubevirtBootstrapSecret(ctx *contex
 		if bootstrapSecret.ObjectMeta.Labels == nil {
 			bootstrapSecret.ObjectMeta.Labels = map[string]string{}
 		}
+		// Copy all labels from the source secret
+		for k, v := range s.ObjectMeta.Labels {
+			bootstrapSecret.ObjectMeta.Labels[k] = v
+		}
 		bootstrapSecret.ObjectMeta.Labels[clusterv1.ClusterNameLabel] = ctx.Cluster.Name
 
 		return nil

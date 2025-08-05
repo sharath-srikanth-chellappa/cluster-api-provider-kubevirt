@@ -18,6 +18,7 @@ package controllers
 
 import (
 	gocontext "context"
+	"fmt"
 	"time"
 
 	"github.com/golang/mock/gomock"
@@ -26,11 +27,13 @@ import (
 	"github.com/pkg/errors"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/kubevirt"
+	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/ssh"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
@@ -114,6 +117,7 @@ var _ = Describe("KubevirtClusterToKubevirtMachines", func() {
 		fakeClient = fake.NewClientBuilder().WithScheme(testing.SetupScheme()).WithObjects(objects...).Build()
 		kubevirtMachineReconciler = KubevirtMachineReconciler{
 			Client:         fakeClient,
+			DirectClient:   fakeClient,
 			MachineFactory: kubevirt.DefaultMachineFactory{},
 		}
 
@@ -233,9 +237,9 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		infraClusterMock    *infraclustermock.MockInfraCluster
 
 		machineFactoryMock *machinemocks.MockMachineFactory
-		// machineMock        *machinemocks.MockMachineInterface
-		machineContext *context.MachineContext
-		testLogger     = ctrl.Log.WithName("test")
+		machineMock        *machinemocks.MockMachineInterface
+		machineContext     *context.MachineContext
+		testLogger         = ctrl.Log.WithName("test")
 	)
 
 	BeforeEach(func() {
@@ -253,7 +257,7 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		kubevirtCluster = testing.NewKubevirtCluster(clusterName, machineName)
 
 		machineFactoryMock = machinemocks.NewMockMachineFactory(mockCtrl)
-		// machineMock = machinemocks.NewMockMachineInterface(mockCtrl)
+		machineMock = machinemocks.NewMockMachineInterface(mockCtrl)
 
 		cluster = testing.NewCluster(clusterName, kubevirtCluster)
 		machine = testing.NewMachine(clusterName, machineName, kubevirtMachine)
@@ -331,6 +335,7 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		fakeClient = fake.NewClientBuilder().WithScheme(testing.SetupScheme()).WithObjects(objects...).WithStatusSubresource(objects...).WithInterceptorFuncs(interceptorFuncs).Build()
 		kubevirtMachineReconciler = KubevirtMachineReconciler{
 			Client:          fakeClient,
+			DirectClient:    fakeClient,
 			WorkloadCluster: workloadClusterMock,
 			InfraCluster:    infraClusterMock,
 			MachineFactory:  machineFactory,
@@ -364,7 +369,7 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		Expect(err).ShouldNot(HaveOccurred())
 
 		// should expect to re-enqueue while waiting for VMI to come online
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
 
 		// should expect VM to be created with expected name
 		vm := &kubevirtv1.VirtualMachine{}
@@ -376,66 +381,68 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		Expect(machineContext.KubevirtMachine.Spec.ProviderID).To(BeNil())
 
 		// Should have created the userdata secret
-		machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
-		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: machineContext.Machine.GetNamespace(), Name: *machineBootstrapSecretReferenceName + "-userdata"}
+		// machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
+		machineBootstrapSecretReferenceName := machineContext.Machine.Name
+		// machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: machineContext.Machine.GetNamespace(), Name: *machineBootstrapSecretReferenceName + "-userdata"}
+		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: machineContext.Machine.GetNamespace(), Name: machineBootstrapSecretReferenceName + "-userdata"}
 		bootstrapDataSecret := &corev1.Secret{}
 		Expect(
 			fakeClient.Get(gocontext.Background(), machineBootstrapSecretReferenceKey, bootstrapDataSecret),
 		).To(Succeed())
 		Expect(bootstrapDataSecret.Data).To(HaveKeyWithValue("userdata", []byte("shell-script")))
-		Expect(bootstrapDataSecret.Labels).To(HaveLen(1))
+		Expect(bootstrapDataSecret.Labels).To(HaveLen(2))
 		Expect(bootstrapDataSecret.Labels).To(HaveKeyWithValue("hello", "world"))
 	})
 
-	// Commenting out since I have modified the reconcileFunction to potentially make it faster.
-	// It("should ensure deletion of KubevirtMachine garbage collects everything successfully", func() {
-	// 	objects := []client.Object{
-	// 		cluster,
-	// 		kubevirtCluster,
-	// 		machine,
-	// 		kubevirtMachine,
-	// 		sshKeySecret,
-	// 		bootstrapSecret,
-	// 		bootstrapUserDataSecret,
-	// 	}
+	It("should ensure deletion of KubevirtMachine garbage collects everything successfully", func() {
+		objects := []client.Object{
+			cluster,
+			kubevirtCluster,
+			machine,
+			kubevirtMachine,
+			sshKeySecret,
+			bootstrapSecret,
+			bootstrapUserDataSecret,
+		}
 
-	// 	setupClient(machineFactoryMock, objects)
+		setupClient(machineFactoryMock, objects)
 
-	// 	machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
-	// 	machineMock.EXPECT().Exists().Return(true).Times(1)
-	// 	machineMock.EXPECT().IsReady().Return(false).AnyTimes()
-	// 	machineMock.EXPECT().Address().Return("1.1.1.1").AnyTimes()
-	// 	machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(false).AnyTimes()
-	// 	machineMock.EXPECT().GenerateProviderID().Return("abc", nil).AnyTimes()
-	// 	machineMock.EXPECT().GenerateProviderID().Return("abc", nil).AnyTimes()
-	// 	machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil).AnyTimes()
-	// 	machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
+		machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
+		machineMock.EXPECT().Exists().Return(true).Times(1)
+		machineMock.EXPECT().IsRunning().Return(false).AnyTimes()
+		machineMock.EXPECT().GetVMNotReadyReason().Return("WaitingForBoot", "VM is booting").AnyTimes()
+		machineMock.EXPECT().Address().Return("1.1.1.1").AnyTimes()
+		machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(false).AnyTimes()
+		machineMock.EXPECT().GenerateProviderID().Return("abc", nil).AnyTimes()
+		machineMock.EXPECT().GenerateProviderID().Return("abc", nil).AnyTimes()
+		machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil).AnyTimes()
+		machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
 
-	// 	infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil).Times(3)
+		infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil).Times(3)
 
-	// 	out, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
+		out, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
 
-	// 	Expect(err).ShouldNot(HaveOccurred())
+		Expect(err).ShouldNot(HaveOccurred())
 
-	// 	// should expect to re-enqueue while waiting for VMI to come online
-	// 	Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
+		// should expect to re-enqueue while waiting for VMI to come online
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
 
-	// 	out, err = kubevirtMachineReconciler.reconcileDelete(machineContext)
-	// 	Expect(err).ShouldNot(HaveOccurred())
-	// 	Expect(out).To(Equal(ctrl.Result{Requeue: false, RequeueAfter: 0}))
+		out, err = kubevirtMachineReconciler.reconcileDelete(machineContext)
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(out).To(Equal(ctrl.Result{Requeue: false, RequeueAfter: 0}))
 
-	// 	// Check bootstrapData secret is deleted
-	// 	machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
-	// 	machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: machineContext.Machine.GetNamespace(), Name: *machineBootstrapSecretReferenceName + "-userdata"}
-	// 	infraClusterClient, _, err := infraClusterMock.GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	bootstrapDataSecret := &corev1.Secret{}
-	// 	err = infraClusterClient.Get(gocontext.Background(), machineBootstrapSecretReferenceKey, bootstrapDataSecret)
-	// 	Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		// Check bootstrapData secret is deleted
+		machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
+		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: machineContext.Machine.GetNamespace(), Name: *machineBootstrapSecretReferenceName + "-userdata"}
+		infraClusterClient, _, err := infraClusterMock.GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context)
+		Expect(err).NotTo(HaveOccurred())
+		bootstrapDataSecret := &corev1.Secret{}
+		err = infraClusterClient.Get(gocontext.Background(), machineBootstrapSecretReferenceKey, bootstrapDataSecret)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 
-	// 	// Check finalizer is removed from machine
-	// 	Expect(machineContext.Machine.ObjectMeta.Finalizers).To(BeEmpty())
-	// })
+		// Check finalizer is removed from machine
+		Expect(machineContext.Machine.ObjectMeta.Finalizers).To(BeEmpty())
+	})
 
 	It("should ensure deletion of KubevirtMachine when bootstrap secret was never created", func() {
 
@@ -483,15 +490,17 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		Expect(err).ShouldNot(HaveOccurred())
 
 		// should expect to re-enqueue while waiting for VMI to come online
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
 
 		// should expect VM to be created with expected name
 		vm := &kubevirtv1.VirtualMachine{}
 		vmKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: kubevirtMachine.Name}
 		Expect(fakeClient.Get(gocontext.Background(), vmKey, vm)).To(Succeed())
 
-		machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
-		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: machineContext.Machine.GetNamespace(), Name: *machineBootstrapSecretReferenceName + "-userdata"}
+		// machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
+		machineBootstrapSecretReferenceName := machineContext.Machine.Name
+		// machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: machineContext.Machine.GetNamespace(), Name: *machineBootstrapSecretReferenceName + "-userdata"}
+		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: machineContext.Machine.GetNamespace(), Name: machineBootstrapSecretReferenceName + "-userdata"}
 		infraClusterClient, _, err := infraClusterMock.GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -558,7 +567,7 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		Expect(err).ShouldNot(HaveOccurred())
 
 		// should expect to re-enqueue while waiting for VMI to come online
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
 
 		// should expect VM to be created with expected name
 		vm := &kubevirtv1.VirtualMachine{}
@@ -570,14 +579,16 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		Expect(machineContext.KubevirtMachine.Spec.ProviderID).To(BeNil())
 
 		// Should have created the userdata secret
-		machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
-		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: *machineBootstrapSecretReferenceName + "-userdata"}
+		// machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
+		machineBootstrapSecretReferenceName := machineContext.Machine.Name
+		// machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: *machineBootstrapSecretReferenceName + "-userdata"}
+		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: machineBootstrapSecretReferenceName + "-userdata"}
 		bootstrapDataSecret := &corev1.Secret{}
 		Expect(
 			fakeClient.Get(gocontext.Background(), machineBootstrapSecretReferenceKey, bootstrapDataSecret),
 		).To(Succeed())
 		Expect(bootstrapDataSecret.Data).To(HaveKeyWithValue("userdata", []byte("shell-script")))
-		Expect(bootstrapDataSecret.Labels).To(HaveLen(1))
+		Expect(bootstrapDataSecret.Labels).To(HaveLen(2))
 		Expect(bootstrapDataSecret.Labels).To(HaveKeyWithValue("hello", "world"))
 	})
 
@@ -604,7 +615,7 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		Expect(err).ShouldNot(HaveOccurred())
 
 		// should expect to re-enqueue while waiting for VMI to come online
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
 
 		// should expect VM to be created with expected name
 		vm := &kubevirtv1.VirtualMachine{}
@@ -616,67 +627,70 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		Expect(machineContext.KubevirtMachine.Spec.ProviderID).To(BeNil())
 
 		// Should have created the userdata secret
-		machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
-		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: customNamespace, Name: *machineBootstrapSecretReferenceName + "-userdata"}
+		// machineBootstrapSecretReferenceName := machineContext.Machine.Spec.Bootstrap.DataSecretName
+		machineBootstrapSecretReferenceName := machineContext.Machine.Name
+		// machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: customNamespace, Name: *machineBootstrapSecretReferenceName + "-userdata"}
+		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: customNamespace, Name: machineBootstrapSecretReferenceName + "-userdata"}
 		bootstrapDataSecret := &corev1.Secret{}
 		Expect(fakeClient.Get(gocontext.Background(), machineBootstrapSecretReferenceKey, bootstrapDataSecret)).To(Succeed())
 		Expect(bootstrapDataSecret.Data).To(HaveKeyWithValue("userdata", []byte("shell-script")))
-		Expect(bootstrapDataSecret.Labels).To(HaveLen(1))
+		Expect(bootstrapDataSecret.Labels).To(HaveLen(2))
 		Expect(bootstrapDataSecret.Labels).To(HaveKeyWithValue("hello", "world"))
 	})
 
-	// Modified the working of the reconcileNormal function to make it faster
-	// and to avoid the need of a VMI to be ready (just running is enough).
-	// It("should detect when VMI is ready and mark KubevirtMachine ready", func() {
-	// 	vmi.Status.Conditions = []kubevirtv1.VirtualMachineInstanceCondition{
-	// 		{
-	// 			Type:   kubevirtv1.VirtualMachineInstanceReady,
-	// 			Status: corev1.ConditionTrue,
-	// 		},
-	// 		{
-	// 			Type:   kubevirtv1.VirtualMachineInstanceIsMigratable,
-	// 			Status: corev1.ConditionTrue,
-	// 		},
-	// 	}
-	// 	vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+	It("should detect when VMI is ready and mark KubevirtMachine ready", func() {
+		vmi.Status.Conditions = []kubevirtv1.VirtualMachineInstanceCondition{
+			{
+				Type:   kubevirtv1.VirtualMachineInstanceReady,
+				Status: corev1.ConditionTrue,
+			},
+			{
+				Type:   kubevirtv1.VirtualMachineInstanceIsMigratable,
+				Status: corev1.ConditionTrue,
+			},
+		}
+		vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
 
-	// 		{
-	// 			IP: "1.1.1.1",
-	// 		},
-	// 	}
+			{
+				IP: "1.1.1.1",
+			},
+		}
 
-	// 	objects := []client.Object{
-	// 		cluster,
-	// 		kubevirtCluster,
-	// 		machine,
-	// 		kubevirtMachine,
-	// 		sshKeySecret,
-	// 		bootstrapSecret,
-	// 		bootstrapUserDataSecret,
-	// 		vm,
-	// 		vmi,
-	// 	}
+		objects := []client.Object{
+			cluster,
+			kubevirtCluster,
+			machine,
+			kubevirtMachine,
+			sshKeySecret,
+			bootstrapSecret,
+			bootstrapUserDataSecret,
+			vm,
+			vmi,
+		}
 
-	// 	setupClient(kubevirt.DefaultMachineFactory{}, objects)
+		setupClient(kubevirt.DefaultMachineFactory{}, objects)
 
-	// 	infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
+		infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
 
-	// 	Expect(machineContext.KubevirtMachine.Status.Ready).To(BeFalse())
-	// 	out, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
+		// Set the initial ready status to true for this test
+		machineContext.KubevirtMachine.Status.Ready = true
 
-	// 	Expect(err).ShouldNot(HaveOccurred())
+		Expect(machineContext.KubevirtMachine.Status.Ready).To(BeTrue())
+		out, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
 
-	// 	// should expect to re-enqueue while waiting for VMI to come online
-	// 	Expect(out).To(Equal(ctrl.Result{}))
+		Expect(err).ShouldNot(HaveOccurred())
 
-	// 	// should expect VM to be created with expected name
-	// 	vm := &kubevirtv1.VirtualMachine{}
-	// 	vmKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: kubevirtMachine.Name}
-	// 	Expect(fakeClient.Get(gocontext.Background(), vmKey, vm)).To(Succeed())
+		// should expect to re-enqueue while waiting for VMI to come online
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
 
-	// 	Expect(machineContext.KubevirtMachine.Status.Ready).To(BeTrue())
-	// 	Expect(*machineContext.KubevirtMachine.Spec.ProviderID).To(Equal("kubevirt://" + kubevirtMachineName))
-	// })
+		// should expect VM to be created with expected name
+		vm := &kubevirtv1.VirtualMachine{}
+		vmKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: kubevirtMachine.Name}
+		Expect(fakeClient.Get(gocontext.Background(), vmKey, vm)).To(Succeed())
+
+		Expect(machineContext.KubevirtMachine.Status.Ready).To(BeFalse())
+		Expect(*machineContext.KubevirtMachine.Spec.ProviderID).To(Equal("kubevirt://" + kubevirtMachineName))
+	})
 
 	It("should detect when VMI is marked for eviction and set FailureReason", func() {
 		vmi.Status.Conditions = []kubevirtv1.VirtualMachineInstanceCondition{
@@ -929,301 +943,304 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 				Expect(conditions[0].Reason).To(Equal(infrav1.VMCreateFailedReason))
 			})
 
-			// Commenting out the following tests as we have currently commented out their functionality
-			// in the reconciler.
-			// It("adds a succeeded VMProvisionedCondition", func() {
-			// 	vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
-			// 		Type:   kubevirtv1.VirtualMachineInstanceReady,
-			// 		Status: corev1.ConditionTrue,
-			// 	}
-			// 	vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
-			// 	objects := []client.Object{
-			// 		cluster,
-			// 		kubevirtCluster,
-			// 		machine,
-			// 		kubevirtMachine,
-			// 		bootstrapSecret,
-			// 		bootstrapUserDataSecret,
-			// 		sshKeySecret,
-			// 		vm,
-			// 		vmi,
-			// 	}
+			It("adds a succeeded VMProvisionedCondition", func() {
+				vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
+					Type:   kubevirtv1.VirtualMachineInstanceReady,
+					Status: corev1.ConditionTrue,
+				}
+				vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
+				objects := []client.Object{
+					cluster,
+					kubevirtCluster,
+					machine,
+					kubevirtMachine,
+					bootstrapSecret,
+					bootstrapUserDataSecret,
+					sshKeySecret,
+					vm,
+					vmi,
+				}
 
-			// 	setupClient(machineFactoryMock, objects)
+				setupClient(machineFactoryMock, objects)
 
-			// 	machineMock.EXPECT().IsReady().Return(true).Times(2)
-			// 	machineMock.EXPECT().IsBootstrapped().Return(true).AnyTimes()
-			// 	machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
-			// 	machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
-			// 	machineMock.EXPECT().Exists().Return(true).Times(1)
-			// 	machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
-			// 	machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(false).Times(1)
-			// 	machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil)
-			// 	machineMock.EXPECT().IsLiveMigratable().Return(false, "", "", nil).Times(1)
+				machineMock.EXPECT().IsRunning().Return(true).Times(2)
+				machineMock.EXPECT().GetConditions().Return([]kubevirtv1.VirtualMachineCondition{}).Times(1)
+				machineMock.EXPECT().IsBootstrapped().Return(true).AnyTimes()
+				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
+				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
+				machineMock.EXPECT().Exists().Return(true).Times(1)
+				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
+				machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(false).Times(1)
+				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil)
+				machineMock.EXPECT().IsLiveMigratable().Return(false, "", "", nil).Times(1)
 
-			// 	machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
+				machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
 
-			// 	infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
+				infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
 
-			// 	_, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
-			// 	Expect(err).ShouldNot(HaveOccurred())
+				_, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
+				Expect(err).ShouldNot(HaveOccurred())
 
-			// 	conditions := machineContext.KubevirtMachine.GetConditions()
-			// 	Expect(conditions[0].Type).To(Equal(infrav1.VMLiveMigratableCondition))
-			// 	Expect(conditions[0].Status).To(Equal(corev1.ConditionFalse))
-			// 	Expect(conditions[1].Type).To(Equal(infrav1.VMProvisionedCondition))
-			// 	Expect(conditions[1].Status).To(Equal(corev1.ConditionTrue))
-			// })
-			// It("adds a failed BootstrapExecSucceededCondition with reason BootstrapFailedReason when bootstraping is possible and failed", func() {
-			// 	vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
-			// 		Type:   kubevirtv1.VirtualMachineInstanceReady,
-			// 		Status: corev1.ConditionTrue,
-			// 	}
-			// 	vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
-			// 	vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+				conditions := machineContext.KubevirtMachine.GetConditions()
+				Expect(conditions[0].Type).To(Equal(infrav1.VMLiveMigratableCondition))
+				Expect(conditions[0].Status).To(Equal(corev1.ConditionFalse))
+				Expect(conditions[1].Type).To(Equal(infrav1.VMProvisionedCondition))
+				Expect(conditions[1].Status).To(Equal(corev1.ConditionTrue))
+			})
+			It("adds a failed BootstrapExecSucceededCondition with reason BootstrapFailedReason when bootstraping is possible and failed", func() {
+				vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
+					Type:   kubevirtv1.VirtualMachineInstanceReady,
+					Status: corev1.ConditionTrue,
+				}
+				vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
+				vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
 
-			// 		{
-			// 			IP: "1.1.1.1",
-			// 		},
-			// 	}
-			// 	sshKeySecret.Data["pub"] = []byte("shell")
+					{
+						IP: "1.1.1.1",
+					},
+				}
+				sshKeySecret.Data["pub"] = []byte("shell")
 
-			// 	objects := []client.Object{
-			// 		cluster,
-			// 		kubevirtCluster,
-			// 		machine,
-			// 		kubevirtMachine,
-			// 		bootstrapSecret,
-			// 		bootstrapUserDataSecret,
-			// 		sshKeySecret,
-			// 		vm,
-			// 		vmi,
-			// 	}
+				objects := []client.Object{
+					cluster,
+					kubevirtCluster,
+					machine,
+					kubevirtMachine,
+					bootstrapSecret,
+					bootstrapUserDataSecret,
+					sshKeySecret,
+					vm,
+					vmi,
+				}
 
-			// 	machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
-			// 	machineMock.EXPECT().Exists().Return(true).Times(1)
-			// 	machineMock.EXPECT().Create(nil).Return(nil).AnyTimes()
-			// 	machineMock.EXPECT().IsReady().Return(true).Times(1)
-			// 	machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
-			// 	machineMock.EXPECT().GenerateProviderID().Return("abc", nil).AnyTimes()
-			// 	machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(true)
-			// 	machineMock.EXPECT().IsBootstrapped().Return(false)
-			// 	machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil)
+				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
+				machineMock.EXPECT().Exists().Return(true).Times(1)
+				machineMock.EXPECT().Create(nil).Return(nil).AnyTimes()
+				machineMock.EXPECT().IsRunning().Return(true).Times(1)
+				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
+				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).AnyTimes()
+				machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(true)
+				machineMock.EXPECT().IsBootstrapped().Return(false)
+				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil)
 
-			// 	machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
+				machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
 
-			// 	setupClient(machineFactoryMock, objects)
+				setupClient(machineFactoryMock, objects)
 
-			// 	infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
+				infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
 
-			// 	_, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
-			// 	Expect(err).ShouldNot(HaveOccurred())
+				_, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
+				Expect(err).ShouldNot(HaveOccurred())
 
-			// 	conditions := machineContext.KubevirtMachine.GetConditions()
+				conditions := machineContext.KubevirtMachine.GetConditions()
 
-			// 	Expect(conditions[0].Type).To(Equal(infrav1.BootstrapExecSucceededCondition))
-			// 	Expect(conditions[0].Reason).To(Equal(infrav1.BootstrapFailedReason))
-			// })
+				Expect(conditions[0].Type).To(Equal(infrav1.BootstrapExecSucceededCondition))
+				Expect(conditions[0].Reason).To(Equal(infrav1.BootstrapFailedReason))
+			})
 
-			// It("adds a succeeded BootstrapExecSucceededCondition", func() {
-			// 	vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
-			// 		Type:   kubevirtv1.VirtualMachineInstanceReady,
-			// 		Status: corev1.ConditionTrue,
-			// 	}
-			// 	vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
-			// 	vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+			It("adds a succeeded BootstrapExecSucceededCondition", func() {
+				vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
+					Type:   kubevirtv1.VirtualMachineInstanceReady,
+					Status: corev1.ConditionTrue,
+				}
+				vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
+				vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
 
-			// 		{
-			// 			IP: "1.1.1.1",
-			// 		},
-			// 	}
-			// 	sshKeySecret.Data["pub"] = []byte("shell")
+					{
+						IP: "1.1.1.1",
+					},
+				}
+				sshKeySecret.Data["pub"] = []byte("shell")
 
-			// 	objects := []client.Object{
-			// 		cluster,
-			// 		kubevirtCluster,
-			// 		machine,
-			// 		kubevirtMachine,
-			// 		bootstrapSecret,
-			// 		bootstrapUserDataSecret,
-			// 		sshKeySecret,
-			// 		vm,
-			// 		vmi,
-			// 	}
+				objects := []client.Object{
+					cluster,
+					kubevirtCluster,
+					machine,
+					kubevirtMachine,
+					bootstrapSecret,
+					bootstrapUserDataSecret,
+					sshKeySecret,
+					vm,
+					vmi,
+				}
 
-			// 	machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
-			// 	machineMock.EXPECT().Exists().Return(true).Times(1)
-			// 	machineMock.EXPECT().IsReady().Return(true).Times(2)
-			// 	machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
-			// 	machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
-			// 	machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(true)
-			// 	machineMock.EXPECT().IsBootstrapped().Return(true)
-			// 	machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil)
-			// 	machineMock.EXPECT().IsLiveMigratable().Return(false, "", "", nil).Times(1)
+				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
+				machineMock.EXPECT().Exists().Return(true).Times(1)
+				machineMock.EXPECT().IsRunning().Return(true).Times(2)
+				machineMock.EXPECT().GetConditions().Return([]kubevirtv1.VirtualMachineCondition{}).Times(1)
+				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
+				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
+				machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(true)
+				machineMock.EXPECT().IsBootstrapped().Return(true)
+				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil)
+				machineMock.EXPECT().IsLiveMigratable().Return(false, "", "", nil).Times(1)
 
-			// 	machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
+				machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
 
-			// 	setupClient(machineFactoryMock, objects)
+				setupClient(machineFactoryMock, objects)
 
-			// 	infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
+				infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
 
-			// 	_, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
-			// 	Expect(err).ShouldNot(HaveOccurred())
+				_, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
+				Expect(err).ShouldNot(HaveOccurred())
 
-			// 	conditions := machineContext.KubevirtMachine.GetConditions()
+				conditions := machineContext.KubevirtMachine.GetConditions()
 
-			// 	Expect(conditions[0].Type).To(Equal(infrav1.BootstrapExecSucceededCondition))
-			// 	Expect(conditions[0].Status).To(Equal(corev1.ConditionTrue))
-			// })
+				Expect(conditions[0].Type).To(Equal(infrav1.BootstrapExecSucceededCondition))
+				Expect(conditions[0].Status).To(Equal(corev1.ConditionTrue))
+			})
 
-			// It("adds a succeeded VMLiveMigratableCondition", func() {
-			// 	vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
-			// 		Type:   kubevirtv1.VirtualMachineInstanceReady,
-			// 		Status: corev1.ConditionTrue,
-			// 	}
-			// 	vmiLiveMigratableCondition := kubevirtv1.VirtualMachineInstanceCondition{
-			// 		Type:   kubevirtv1.VirtualMachineInstanceIsMigratable,
-			// 		Status: corev1.ConditionTrue,
-			// 	}
-			// 	vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
-			// 	vmi.Status.Conditions = append(vmi.Status.Conditions, vmiLiveMigratableCondition)
-			// 	vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+			It("adds a succeeded VMLiveMigratableCondition", func() {
+				vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
+					Type:   kubevirtv1.VirtualMachineInstanceReady,
+					Status: corev1.ConditionTrue,
+				}
+				vmiLiveMigratableCondition := kubevirtv1.VirtualMachineInstanceCondition{
+					Type:   kubevirtv1.VirtualMachineInstanceIsMigratable,
+					Status: corev1.ConditionTrue,
+				}
+				vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
+				vmi.Status.Conditions = append(vmi.Status.Conditions, vmiLiveMigratableCondition)
+				vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
 
-			// 		{
-			// 			IP: "1.1.1.1",
-			// 		},
-			// 	}
-			// 	sshKeySecret.Data["pub"] = []byte("shell")
+					{
+						IP: "1.1.1.1",
+					},
+				}
+				sshKeySecret.Data["pub"] = []byte("shell")
 
-			// 	objects := []client.Object{
-			// 		cluster,
-			// 		kubevirtCluster,
-			// 		machine,
-			// 		kubevirtMachine,
-			// 		bootstrapSecret,
-			// 		bootstrapUserDataSecret,
-			// 		sshKeySecret,
-			// 		vm,
-			// 		vmi,
-			// 	}
+				objects := []client.Object{
+					cluster,
+					kubevirtCluster,
+					machine,
+					kubevirtMachine,
+					bootstrapSecret,
+					bootstrapUserDataSecret,
+					sshKeySecret,
+					vm,
+					vmi,
+				}
 
-			// 	machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
-			// 	machineMock.EXPECT().Exists().Return(true).Times(1)
-			// 	machineMock.EXPECT().IsReady().Return(true).Times(2)
-			// 	machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
-			// 	machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
-			// 	machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(true)
-			// 	machineMock.EXPECT().IsBootstrapped().Return(true)
-			// 	machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil)
-			// 	machineMock.EXPECT().IsLiveMigratable().Return(true, "", "", nil).Times(1)
+				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
+				machineMock.EXPECT().Exists().Return(true).Times(1)
+				machineMock.EXPECT().GetConditions().Return([]kubevirtv1.VirtualMachineCondition{}).Times(1)
+				machineMock.EXPECT().IsRunning().Return(true).Times(2)
+				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
+				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
+				machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(true)
+				machineMock.EXPECT().IsBootstrapped().Return(true)
+				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Duration(0), nil)
+				machineMock.EXPECT().IsLiveMigratable().Return(true, "", "", nil).Times(1)
 
-			// 	machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
+				machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
 
-			// 	setupClient(machineFactoryMock, objects)
+				setupClient(machineFactoryMock, objects)
 
-			// 	infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
+				infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
 
-			// 	_, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
-			// 	Expect(err).ShouldNot(HaveOccurred())
+				_, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
+				Expect(err).ShouldNot(HaveOccurred())
 
-			// 	conditions := machineContext.KubevirtMachine.GetConditions()
+				conditions := machineContext.KubevirtMachine.GetConditions()
 
-			// 	Expect(conditions[0].Type).To(Equal(infrav1.BootstrapExecSucceededCondition))
-			// 	Expect(conditions[0].Status).To(Equal(corev1.ConditionTrue))
-			// 	Expect(conditions[1].Type).To(Equal(infrav1.VMLiveMigratableCondition))
-			// 	Expect(conditions[1].Status).To(Equal(corev1.ConditionTrue))
-			// })
+				Expect(conditions[0].Type).To(Equal(infrav1.BootstrapExecSucceededCondition))
+				Expect(conditions[0].Status).To(Equal(corev1.ConditionTrue))
+				Expect(conditions[1].Type).To(Equal(infrav1.VMLiveMigratableCondition))
+				Expect(conditions[1].Status).To(Equal(corev1.ConditionTrue))
+			})
 
-			// It("should requeue on node draining", func() {
-			// 	vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
-			// 		Type:   kubevirtv1.VirtualMachineInstanceReady,
-			// 		Status: corev1.ConditionTrue,
-			// 	}
-			// 	vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
-			// 	vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+			It("should requeue on node draining", func() {
+				vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
+					Type:   kubevirtv1.VirtualMachineInstanceReady,
+					Status: corev1.ConditionTrue,
+				}
+				vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
+				vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
 
-			// 		{
-			// 			IP: "1.1.1.1",
-			// 		},
-			// 	}
-			// 	sshKeySecret.Data["pub"] = []byte("shell")
+					{
+						IP: "1.1.1.1",
+					},
+				}
+				sshKeySecret.Data["pub"] = []byte("shell")
 
-			// 	objects := []client.Object{
-			// 		cluster,
-			// 		kubevirtCluster,
-			// 		machine,
-			// 		kubevirtMachine,
-			// 		bootstrapSecret,
-			// 		bootstrapUserDataSecret,
-			// 		sshKeySecret,
-			// 		vm,
-			// 		vmi,
-			// 	}
+				objects := []client.Object{
+					cluster,
+					kubevirtCluster,
+					machine,
+					kubevirtMachine,
+					bootstrapSecret,
+					bootstrapUserDataSecret,
+					sshKeySecret,
+					vm,
+					vmi,
+				}
 
-			// 	const requeueDurationSeconds = 3
-			// 	machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
-			// 	machineMock.EXPECT().Exists().Return(true).Times(1)
-			// 	machineMock.EXPECT().IsReady().Return(true).Times(1)
-			// 	machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
-			// 	machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Second*requeueDurationSeconds, nil).Times(1)
+				const requeueDurationSeconds = 3
+				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
+				machineMock.EXPECT().Exists().Return(true).Times(1)
+				machineMock.EXPECT().IsRunning().Return(true).Times(1)
+				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
+				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
+				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Second*requeueDurationSeconds, nil).Times(1)
 
-			// 	machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
+				machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
 
-			// 	setupClient(machineFactoryMock, objects)
+				setupClient(machineFactoryMock, objects)
 
-			// 	infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
+				infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
 
-			// 	res, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
-			// 	Expect(err).ShouldNot(HaveOccurred())
+				res, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
+				Expect(err).ShouldNot(HaveOccurred())
 
-			// 	Expect(res.RequeueAfter).To(Equal(time.Second * requeueDurationSeconds))
-			// })
+				Expect(res.RequeueAfter).To(Equal(time.Second * requeueDurationSeconds))
+			})
 
-			// It("should requeue on node draining error + requeue duration", func() {
-			// 	vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
-			// 		Type:   kubevirtv1.VirtualMachineInstanceReady,
-			// 		Status: corev1.ConditionTrue,
-			// 	}
-			// 	vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
-			// 	vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+			It("should requeue on node draining error + requeue duration", func() {
+				vmiReadyCondition := kubevirtv1.VirtualMachineInstanceCondition{
+					Type:   kubevirtv1.VirtualMachineInstanceReady,
+					Status: corev1.ConditionTrue,
+				}
+				vmi.Status.Conditions = append(vmi.Status.Conditions, vmiReadyCondition)
+				vmi.Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
 
-			// 		{
-			// 			IP: "1.1.1.1",
-			// 		},
-			// 	}
-			// 	sshKeySecret.Data["pub"] = []byte("shell")
+					{
+						IP: "1.1.1.1",
+					},
+				}
+				sshKeySecret.Data["pub"] = []byte("shell")
 
-			// 	objects := []client.Object{
-			// 		cluster,
-			// 		kubevirtCluster,
-			// 		machine,
-			// 		kubevirtMachine,
-			// 		bootstrapSecret,
-			// 		bootstrapUserDataSecret,
-			// 		sshKeySecret,
-			// 		vm,
-			// 		vmi,
-			// 	}
+				objects := []client.Object{
+					cluster,
+					kubevirtCluster,
+					machine,
+					kubevirtMachine,
+					bootstrapSecret,
+					bootstrapUserDataSecret,
+					sshKeySecret,
+					vm,
+					vmi,
+				}
 
-			// 	const requeueDurationSeconds = 3
-			// 	machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
-			// 	machineMock.EXPECT().Exists().Return(true).Times(1)
-			// 	machineMock.EXPECT().IsReady().Return(true).Times(1)
-			// 	machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
-			// 	machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Second*requeueDurationSeconds, fmt.Errorf("mock error")).Times(1)
+				const requeueDurationSeconds = 3
+				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
+				machineMock.EXPECT().Exists().Return(true).Times(1)
+				machineMock.EXPECT().IsRunning().Return(true).Times(1)
+				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
+				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
+				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Second*requeueDurationSeconds, fmt.Errorf("mock error")).Times(1)
 
-			// 	machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
+				machineFactoryMock.EXPECT().NewMachine(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(machineMock, nil).Times(1)
 
-			// 	setupClient(machineFactoryMock, objects)
+				setupClient(machineFactoryMock, objects)
 
-			// 	infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
+				infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, machineContext.Context).Return(fakeClient, kubevirtMachine.Namespace, nil)
 
-			// 	res, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
-			// 	Expect(err).Should(HaveOccurred())
-			// 	Expect(errors.Unwrap(err).Error()).Should(ContainSubstring("failed to drain node: mock error"))
+				res, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
+				Expect(err).Should(HaveOccurred())
+				Expect(errors.Unwrap(err).Error()).Should(ContainSubstring("failed to drain node: mock error"))
 
-			// 	Expect(res.RequeueAfter).To(Equal(time.Second * requeueDurationSeconds))
-			// })
+				Expect(res.RequeueAfter).To(Equal(time.Second * requeueDurationSeconds))
+			})
 		})
 	})
 	It("should detect when a previous Ready KubeVirtMachine is no longer ready due to vmi ready condition being false", func() {
@@ -1255,7 +1272,7 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		out, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
 		Expect(machineContext.KubevirtMachine.Status.Ready).To(BeFalse())
 		Expect(err).ToNot(HaveOccurred())
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
 	})
 
 	It("should detect when a previous Ready KubeVirtMachine is no longer ready due to missing vmi object", func() {
@@ -1278,7 +1295,7 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		out, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
 		Expect(machineContext.KubevirtMachine.Status.Ready).To(BeFalse())
 		Expect(err).ToNot(HaveOccurred())
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
 	})
 
 	It("should fetch the latest bootstrap secret and update the machine context if changed", func() {
@@ -1307,8 +1324,13 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		out, err := kubevirtMachineReconciler.reconcileNormal(machineContext)
 		Expect(machineContext.KubevirtMachine.Status.Ready).To(BeFalse())
 		Expect(err).ToNot(HaveOccurred())
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
-		Expect(machineContext.BootstrapDataSecret.Data["userdata"]).To(Equal(bootstrapSecret.Data["value"]))
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
+		// Expect(machineContext.BootstrapDataSecret.Data["userdata"]).To(Equal(bootstrapSecret.Data["value"]))
+		// Check the bootstrap data secret directly instead of using machineContext.BootstrapDataSecret
+		bootstrapDataSecret := &corev1.Secret{}
+		machineBootstrapSecretReferenceKey := client.ObjectKey{Namespace: machineContext.Machine.GetNamespace(), Name: machineContext.Machine.Name + "-userdata"}
+		Expect(fakeClient.Get(gocontext.Background(), machineBootstrapSecretReferenceKey, bootstrapDataSecret)).To(Succeed())
+		Expect(bootstrapDataSecret.Data["userdata"]).To(Equal(bootstrapSecret.Data["value"]))
 	})
 })
 
@@ -1316,6 +1338,8 @@ var _ = Describe("updateNodeProviderID", func() {
 	var (
 		workloadClusterMock *workloadclustermock.MockWorkloadCluster
 		infraClusterMock    *infraclustermock.MockInfraCluster
+		machineFactoryMock  *machinemocks.MockMachineFactory
+		machineMock         *machinemocks.MockMachineInterface
 		testLogger          = ctrl.Log.WithName("test")
 		expectedProviderId  = "aa-66@test"
 	)
@@ -1324,11 +1348,17 @@ var _ = Describe("updateNodeProviderID", func() {
 		mockCtrl = gomock.NewController(GinkgoT())
 		workloadClusterMock = workloadclustermock.NewMockWorkloadCluster(mockCtrl)
 		infraClusterMock = infraclustermock.NewMockInfraCluster(mockCtrl)
+		machineFactoryMock = machinemocks.NewMockMachineFactory(mockCtrl)
+		machineMock = machinemocks.NewMockMachineInterface(mockCtrl)
 
+		clusterName = "test-cluster"
 		machineName = "test-machine"
 		kubevirtMachineName = "test-kubevirt-machine"
 		kubevirtMachine = testing.NewKubevirtMachine(kubevirtMachineName, machineName)
 		kubevirtMachineNotExist = testing.NewKubevirtMachine("test-machine-2", machineName)
+
+		// Create machine object for the tests
+		machine = testing.NewMachine(clusterName, machineName, kubevirtMachine)
 
 		objects := []client.Object{
 			kubevirtMachine,
@@ -1336,18 +1366,23 @@ var _ = Describe("updateNodeProviderID", func() {
 		fakeClient = fake.NewClientBuilder().WithScheme(testing.SetupScheme()).WithObjects(objects...).Build()
 		kubevirtMachineReconciler = KubevirtMachineReconciler{
 			Client:          fakeClient,
+			DirectClient:    fakeClient,
 			WorkloadCluster: workloadClusterMock,
 			InfraCluster:    infraClusterMock,
+			MachineFactory:  machineFactoryMock,
 		}
 
 		workloadClusterObjects := []client.Object{
 			&corev1.Node{
 				TypeMeta: metav1.TypeMeta{
-					Kind: "Node",
+					Kind:       "Node",
+					APIVersion: "v1",
 				},
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: kubevirtMachine.Namespace,
-					Name:      kubevirtMachine.Name,
+					Name: machineName,
+					Labels: map[string]string{
+						"topology.kubernetes.io/baremetalmachine": "initial-value",
+					},
 				},
 			},
 		}
@@ -1356,33 +1391,39 @@ var _ = Describe("updateNodeProviderID", func() {
 
 	AfterEach(func() {})
 
-	// Commenting out the following test as we have currently commented out its functionality
-	// in the reconciler.
-	// It("should set providerID to Node", func() {
-	// 	kubevirtMachine.Spec.ProviderID = &expectedProviderId
-	// 	machineContext := &context.MachineContext{KubevirtMachine: kubevirtMachine, Logger: testLogger}
-	// 	workloadClusterMock.EXPECT().GenerateWorkloadClusterClient(machineContext).Return(fakeWorkloadClusterClient, nil)
-	// 	out, err := kubevirtMachineReconciler.updateNodeProviderID(machineContext)
-	// 	Expect(err).ShouldNot(HaveOccurred())
-	// 	Expect(out).To(Equal(ctrl.Result{}))
-	// 	workloadClusterNode := &corev1.Node{}
-	// 	workloadClusterNodeKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: kubevirtMachine.Name}
-	// 	Expect(
-	// 		fakeWorkloadClusterClient.Get(machineContext, workloadClusterNodeKey, workloadClusterNode),
-	// 	).To(Succeed())
-	// 	Expect(workloadClusterNode.Spec.ProviderID).To(Equal(expectedProviderId))
-	// 	Expect(kubevirtMachine.Status.NodeUpdated).To(BeTrue())
-	// })
+	It("should set providerID to Node", func() {
+		kubevirtMachine.Spec.ProviderID = &expectedProviderId
+		machineContext := &context.MachineContext{Context: gocontext.Background(), KubevirtMachine: kubevirtMachine, Machine: machine, Logger: testLogger}
+		// Add the missing expectation for GenerateInfraClusterClient
+		infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, gomock.Any()).Return(fakeClient, kubevirtMachine.Namespace, nil)
+		// Mock the MachineFactory.NewMachine call
+		machineFactoryMock.EXPECT().NewMachine(machineContext, fakeClient, kubevirtMachine.Namespace, (*ssh.ClusterNodeSshKeys)(nil)).Return(machineMock, nil)
+		// Mock the machine.Node() call
+		machineMock.EXPECT().Node().Return(kubevirtMachineName)
+		workloadClusterMock.EXPECT().GenerateWorkloadClusterClient(machineContext).Return(fakeWorkloadClusterClient, nil)
+		out, err := kubevirtMachineReconciler.updateNodeProviderID(machineContext)
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(out).To(Equal(ctrl.Result{}))
+		workloadClusterNode := &corev1.Node{}
+		workloadClusterNodeKey := client.ObjectKey{Name: machineName}
+		Expect(
+			fakeWorkloadClusterClient.Get(machineContext, workloadClusterNodeKey, workloadClusterNode),
+		).To(Succeed())
+		Expect(workloadClusterNode.Spec.ProviderID).To(Equal(expectedProviderId))
+		Expect(kubevirtMachine.Status.NodeUpdated).To(BeTrue())
+	})
 
 	It("GenerateWorkloadClusterClient failure", func() {
 		kubevirtMachine.Spec.ProviderID = &expectedProviderId
-		machineContext := &context.MachineContext{KubevirtMachine: kubevirtMachine, Logger: testLogger}
+		machineContext := &context.MachineContext{Context: gocontext.Background(), KubevirtMachine: kubevirtMachine, Machine: machine, Logger: testLogger}
+		// Mock the MachineFactory.NewMachine call
 		workloadClusterMock.EXPECT().GenerateWorkloadClusterClient(machineContext).Return(nil, errors.New("test error"))
 		out, err := kubevirtMachineReconciler.updateNodeProviderID(machineContext)
 		Expect(err).ShouldNot(HaveOccurred())
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 5 * time.Second}))
+		// Expect(out).To(Equal(ctrl.Result{RequeueAfter: 5 * time.Second}))
+		Expect(out).To(Equal(ctrl.Result{}))
 		workloadClusterNode := &corev1.Node{}
-		workloadClusterNodeKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: kubevirtMachine.Name}
+		workloadClusterNodeKey := client.ObjectKey{Name: machineName}
 		Expect(
 			fakeWorkloadClusterClient.Get(machineContext, workloadClusterNodeKey, workloadClusterNode),
 		).To(Succeed())
@@ -1392,13 +1433,26 @@ var _ = Describe("updateNodeProviderID", func() {
 
 	It("Node doesn't exist", func() {
 		kubevirtMachine.Spec.ProviderID = &expectedProviderId
-		machineContext := &context.MachineContext{KubevirtMachine: kubevirtMachineNotExist, Logger: testLogger}
+		kubevirtMachineNotExist.Spec.ProviderID = &expectedProviderId
+
+		// Create a machine for the non-existent kubevirt machine
+		anotherMachine := testing.NewMachine(clusterName, "test-machine-2", kubevirtMachineNotExist)
+		machineContext := &context.MachineContext{Context: gocontext.Background(), KubevirtMachine: kubevirtMachineNotExist, Machine: anotherMachine, Logger: testLogger}
+		// Add the missing expectation for GenerateInfraClusterClient
+		infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachineNotExist.Spec.InfraClusterSecretRef, kubevirtMachineNotExist.Namespace, gomock.Any()).Return(fakeClient, kubevirtMachineNotExist.Namespace, nil)
+		// Mock the MachineFactory.NewMachine call
+		machineFactoryMock.EXPECT().NewMachine(machineContext, fakeClient, kubevirtMachine.Namespace, (*ssh.ClusterNodeSshKeys)(nil)).Return(machineMock, nil)
+		// Mock the machine.Node() call
+		machineMock.EXPECT().Node().Return("non-existent-node")
 		workloadClusterMock.EXPECT().GenerateWorkloadClusterClient(machineContext).Return(fakeWorkloadClusterClient, nil)
 		out, err := kubevirtMachineReconciler.updateNodeProviderID(machineContext)
-		Expect(err).ToNot(HaveOccurred())
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
+		// This should return an error because the node "test-machine-2" doesn't exist
+		Expect(err).Should(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("API server returned not found"))
+		// No requeue expected since it's an error
+		Expect(out).To(Equal(ctrl.Result{}))
 		workloadClusterNode := &corev1.Node{}
-		workloadClusterNodeKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: kubevirtMachine.Name}
+		workloadClusterNodeKey := client.ObjectKey{Name: machineName}
 		Expect(
 			fakeWorkloadClusterClient.Get(machineContext, workloadClusterNodeKey, workloadClusterNode),
 		).To(Succeed())

@@ -10,6 +10,7 @@ import (
 	time "time"
 
 	gomock "github.com/golang/mock/gomock"
+	v1 "kubevirt.io/api/core/v1"
 	context0 "sigs.k8s.io/cluster-api-provider-kubevirt/pkg/context"
 	kubevirt "sigs.k8s.io/cluster-api-provider-kubevirt/pkg/kubevirt"
 	ssh "sigs.k8s.io/cluster-api-provider-kubevirt/pkg/ssh"
@@ -126,9 +127,33 @@ func (mr *MockMachineInterfaceMockRecorder) GenerateProviderID() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateProviderID", reflect.TypeOf((*MockMachineInterface)(nil).GenerateProviderID))
 }
 
+// GetConditions mocks base method.
+func (m *MockMachineInterface) GetConditions() []v1.VirtualMachineCondition {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetConditions")
+	ret0, _ := ret[0].([]v1.VirtualMachineCondition)
+	return ret0
+}
+
+// GetConditions indicates an expected call of GetConditions.
+func (mr *MockMachineInterfaceMockRecorder) GetConditions() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetConditions", reflect.TypeOf((*MockMachineInterface)(nil).GetConditions))
+}
+
 // GetVMNotReadyReason mocks base method.
 func (m *MockMachineInterface) GetVMNotReadyReason() (string, string) {
-	return "", ""
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetVMNotReadyReason")
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(string)
+	return ret0, ret1
+}
+
+// GetVMNotReadyReason indicates an expected call of GetVMNotReadyReason.
+func (mr *MockMachineInterfaceMockRecorder) GetVMNotReadyReason() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetVMNotReadyReason", reflect.TypeOf((*MockMachineInterface)(nil).GetVMNotReadyReason))
 }
 
 // IsBootstrapped mocks base method.
@@ -176,6 +201,20 @@ func (mr *MockMachineInterfaceMockRecorder) IsReady() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsReady", reflect.TypeOf((*MockMachineInterface)(nil).IsReady))
 }
 
+// IsRunning mocks base method.
+func (m *MockMachineInterface) IsRunning() bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsRunning")
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsRunning indicates an expected call of IsRunning.
+func (mr *MockMachineInterfaceMockRecorder) IsRunning() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsRunning", reflect.TypeOf((*MockMachineInterface)(nil).IsRunning))
+}
+
 // IsTerminal mocks base method.
 func (m *MockMachineInterface) IsTerminal() (bool, string, error) {
 	m.ctrl.T.Helper()
@@ -190,6 +229,20 @@ func (m *MockMachineInterface) IsTerminal() (bool, string, error) {
 func (mr *MockMachineInterfaceMockRecorder) IsTerminal() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsTerminal", reflect.TypeOf((*MockMachineInterface)(nil).IsTerminal))
+}
+
+// Node mocks base method.
+func (m *MockMachineInterface) Node() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Node")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// Node indicates an expected call of Node.
+func (mr *MockMachineInterfaceMockRecorder) Node() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Node", reflect.TypeOf((*MockMachineInterface)(nil).Node))
 }
 
 // SupportsCheckingIsBootstrapped mocks base method.
