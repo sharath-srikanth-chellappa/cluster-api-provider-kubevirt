@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
-	cgrecord "k8s.io/client-go/tools/record"
 	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
@@ -94,8 +93,8 @@ func registerScheme() (*runtime.Scheme, error) {
 func initFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&metricsBindAddr, "metrics-bind-addr", "localhost:8080",
 		"The address the metric endpoint binds to.")
-	fs.StringVar(&metricsBindAddrFabric, "metrics-bind-addr-fabric", "localhost:8081",
-		"The address the metric endpoint binds to.")
+	// fs.StringVar(&metricsBindAddrFabric, "metrics-bind-addr-fabric", "localhost:8081",
+	// 	"The address the metric endpoint binds to.")
 	fs.IntVar(&concurrency, "concurrency", 10,
 		"The number of machines to process simultaneously")
 	fs.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -104,8 +103,8 @@ func initFlags(fs *pflag.FlagSet) {
 		"The minimum interval at which watched resources are reconciled (e.g. 15m)")
 	fs.StringVar(&healthAddr, "health-addr", ":9440",
 		"The address the health endpoint binds to.")
-	fs.StringVar(&healthAddrFabric, "health-addr-fabric", ":9441",
-		"The address the health endpoint binds to.")
+	// fs.StringVar(&healthAddrFabric, "health-addr-fabric", ":9441",
+	// 	"The address the health endpoint binds to.")
 	fs.IntVar(&webhookPort, "webhook-port", 9443,
 		"Webhook Server port")
 	fs.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs/",
@@ -140,11 +139,11 @@ func main() {
 		}
 	}
 
-	// Machine and cluster operations can create enough events to trigger the event recorder spam filter
-	// Setting the burst size higher ensures all events will be recorded and submitted to the API
-	broadcaster := cgrecord.NewBroadcasterWithCorrelatorOptions(cgrecord.CorrelatorOptions{
-		BurstSize: 100,
-	})
+	// // Machine and cluster operations can create enough events to trigger the event recorder spam filter
+	// // Setting the burst size higher ensures all events will be recorded and submitted to the API
+	// broadcaster := cgrecord.NewBroadcasterWithCorrelatorOptions(cgrecord.CorrelatorOptions{
+	// 	BurstSize: 100,
+	// })
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:           myscheme,
@@ -155,7 +154,7 @@ func main() {
 			SyncPeriod:        &syncPeriod,
 			DefaultNamespaces: defaultNamespaces,
 		},
-		EventBroadcaster:       broadcaster,
+		// EventBroadcaster:       broadcaster,
 		HealthProbeBindAddress: healthAddr,
 		WebhookServer: webhook.NewServer(webhook.Options{
 			Port:    webhookPort,
@@ -172,44 +171,46 @@ func main() {
 		os.Exit(1)
 	}
 
-	fabricmgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:           myscheme,
-		Metrics:          server.Options{BindAddress: metricsBindAddrFabric},
-		LeaderElection:   enableLeaderElection,
-		LeaderElectionID: "fabric-controller-leader-election-capk",
-		Cache: cache.Options{
-			SyncPeriod:        &syncPeriod,
-			DefaultNamespaces: defaultNamespaces,
-		},
-		HealthProbeBindAddress: healthAddrFabric,
-		WebhookServer: webhook.NewServer(webhook.Options{
-			Port: 10000,
-			TLSOpts: []func(*tls.Config){
-				func(t *tls.Config) {
-					t.MinVersion = tls.VersionTLS12
-				},
-			},
-		}),
-	})
-	if err != nil {
-		setupLog.Error(err, "unable to start manager for fabric cluster")
-		os.Exit(1)
-	}
+	// fabricmgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// 	Scheme:           myscheme,
+	// 	Metrics:          server.Options{BindAddress: metricsBindAddrFabric},
+	// 	LeaderElection:   enableLeaderElection,
+	// 	LeaderElectionID: "fabric-controller-leader-election-capk",
+	// 	Cache: cache.Options{
+	// 		SyncPeriod:        &syncPeriod,
+	// 		DefaultNamespaces: defaultNamespaces,
+	// 	},
+	// 	HealthProbeBindAddress: healthAddrFabric,
+	// 	WebhookServer: webhook.NewServer(webhook.Options{
+	// 		Port: 10000,
+	// 		TLSOpts: []func(*tls.Config){
+	// 			func(t *tls.Config) {
+	// 				t.MinVersion = tls.VersionTLS12
+	// 			},
+	// 		},
+	// 	}),
+	// })
+	// if err != nil {
+	// 	setupLog.Error(err, "unable to start manager for fabric cluster")
+	// 	os.Exit(1)
+	// }
 
 	// Setup the context that's going to be used in controllers and for the manager.
 	ctx := ctrl.SetupSignalHandler()
 
-	setupChecks(mgr, fabricmgr)
-	setupReconcilers(ctx, mgr, fabricmgr)
+	// setupChecks(mgr, fabricmgr)
+	// setupReconcilers(ctx, mgr, fabricmgr)
+	setupChecks(mgr)
+	setupReconcilers(ctx, mgr)
 	setupWebhooks(mgr)
 
-	go func() {
-		setupLog.Info("starting manager for fabric cluster")
-		if err := fabricmgr.Start(context.Background()); err != nil {
-			setupLog.Error(err, "problem running manager for fabric cluster")
-			os.Exit(1)
-		}
-	}()
+	// go func() {
+	// 	setupLog.Info("starting manager for fabric cluster")
+	// 	if err := fabricmgr.Start(context.Background()); err != nil {
+	// 		setupLog.Error(err, "problem running manager for fabric cluster")
+	// 		os.Exit(1)
+	// 	}
+	// }()
 
 	// +kubebuilder:scaffold:builder
 	setupLog.Info("starting manager")
@@ -219,7 +220,8 @@ func main() {
 	}
 }
 
-func setupChecks(mgr ctrl.Manager, fabricmgr ctrl.Manager) {
+// func setupChecks(mgr ctrl.Manager, fabricmgr ctrl.Manager) {
+func setupChecks(mgr ctrl.Manager) {
 	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to create ready check")
 		os.Exit(1)
@@ -230,18 +232,19 @@ func setupChecks(mgr ctrl.Manager, fabricmgr ctrl.Manager) {
 		os.Exit(1)
 	}
 
-	if err := fabricmgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to create ready check for fabric cluster")
-		os.Exit(1)
-	}
+	// if err := fabricmgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
+	// 	setupLog.Error(err, "unable to create ready check for fabric cluster")
+	// 	os.Exit(1)
+	// }
 
-	if err := fabricmgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to create health check for fabric cluster")
-		os.Exit(1)
-	}
+	// if err := fabricmgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
+	// 	setupLog.Error(err, "unable to create health check for fabric cluster")
+	// 	os.Exit(1)
+	// }
 }
 
-func setupReconcilers(ctx context.Context, mgr ctrl.Manager, fabricmgr ctrl.Manager) {
+// func setupReconcilers(ctx context.Context, mgr ctrl.Manager, fabricmgr ctrl.Manager) {
+func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 	noCachedClient, err := k8sclient.New(mgr.GetConfig(), k8sclient.Options{Scheme: mgr.GetClient().Scheme()})
 	if err != nil {
 		setupLog.Error(err, "unable to create controller; failed to generate no-cached client")
@@ -249,9 +252,10 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager, fabricmgr ctrl.Mana
 	}
 
 	if err := (&controllers.KubevirtMachineReconciler{
-		Client:          mgr.GetClient(),
-		DirectClient:    noCachedClient,
-		InfraCluster:    infracluster.New(fabricmgr.GetClient(), noCachedClient),
+		Client:       mgr.GetClient(),
+		DirectClient: noCachedClient,
+		// InfraCluster:    infracluster.New(fabricmgr.GetClient(), noCachedClient),
+		InfraCluster:    infracluster.New(mgr.GetClient(), noCachedClient),
 		WorkloadCluster: workloadcluster.New(mgr.GetClient()),
 		MachineFactory:  kubevirt.DefaultMachineFactory{},
 	}).SetupWithManager(ctx, mgr, controller.Options{
@@ -262,24 +266,25 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager, fabricmgr ctrl.Mana
 	}
 
 	if err := (&controllers.KubevirtClusterReconciler{
-		Client:       mgr.GetClient(),
-		APIReader:    mgr.GetAPIReader(),
-		InfraCluster: infracluster.New(fabricmgr.GetClient(), noCachedClient),
+		Client:    mgr.GetClient(),
+		APIReader: mgr.GetAPIReader(),
+		// InfraCluster: infracluster.New(fabricmgr.GetClient(), noCachedClient),
+		InfraCluster: infracluster.New(mgr.GetClient(), noCachedClient),
 		Log:          ctrl.Log.WithName("controllers").WithName("KubevirtCluster"),
 	}).SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "KubevirtCluster")
 		os.Exit(1)
 	}
 
-	if err = (&controllers.KubevirtVirtualMachineReconciler{
-		Client: fabricmgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("VirtualMachine"),
-	}).SetupWithManager(ctx, fabricmgr, controller.Options{
-		MaxConcurrentReconciles: concurrency,
-	}); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
-		os.Exit(1)
-	}
+	// if err = (&controllers.KubevirtVirtualMachineReconciler{
+	// 	Client: fabricmgr.GetClient(),
+	// 	Log:    ctrl.Log.WithName("controllers").WithName("VirtualMachine"),
+	// }).SetupWithManager(ctx, fabricmgr, controller.Options{
+	// 	MaxConcurrentReconciles: concurrency,
+	// }); err != nil {
+	// 	setupLog.Error(err, "unable to create controller", "controller", "VirtualMachine")
+	// 	os.Exit(1)
+	// }
 
 }
 

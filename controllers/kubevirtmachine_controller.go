@@ -43,10 +43,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	infrav1 "sigs.k8s.io/cluster-api-provider-kubevirt/api/v1alpha1"
@@ -67,7 +65,7 @@ type KubevirtMachineReconciler struct {
 	MachineFactory  kubevirt.MachineFactory
 }
 
-var machineControllerChan = make(chan event.GenericEvent)
+// var machineControllerChan = make(chan event.GenericEvent)
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kubevirtmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=kubevirtmachines/status,verbs=get;update;patch
@@ -89,7 +87,6 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		}
 		return ctrl.Result{}, err
 	}
-	log.Info("Reconcile - 1")
 
 	// Fetch the Machine.
 	machine, err := util.GetOwnerMachine(goctx, r.Client, kubevirtMachine.ObjectMeta)
@@ -102,7 +99,6 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 	}
 
 	log = log.WithValues("machine", machine.Name)
-	// log.Info("Reconcile - 2")
 
 	// Handle deleted machines
 	if !kubevirtMachine.ObjectMeta.DeletionTimestamp.IsZero() {
@@ -118,7 +114,6 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		}
 		return r.reconcileDelete(machineContext)
 	}
-	// log.Info("Reconcile - 3")
 
 	// Fetch the Cluster.
 	cluster, err := util.GetClusterFromMetadata(goctx, r.Client, machine.ObjectMeta)
@@ -130,7 +125,6 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		log.Info(fmt.Sprintf("Please associate this machine with a cluster using the label %s: <name of cluster>", clusterv1.ClusterNameLabel))
 		return ctrl.Result{}, nil
 	}
-	// log.Info("Reconcile - 4")
 
 	log = log.WithValues("cluster", cluster.Name)
 
@@ -144,7 +138,6 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		log.Info("KubevirtCluster is not available yet")
 		return ctrl.Result{}, nil
 	}
-	// log.Info("Reconcile - 5")
 
 	log = log.WithValues("kubevirt-cluster", kubevirtCluster.Name)
 
@@ -157,14 +150,12 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		KubevirtMachine: kubevirtMachine,
 		Logger:          ctrl.LoggerFrom(goctx).WithName(req.Namespace).WithName(req.Name),
 	}
-	// log.Info("Reconcile - 6")
 
 	// Initialize the patch helper
 	patchHelper, err := patch.NewHelper(kubevirtMachine, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	// log.Info("Reconcile - 7")
 
 	// Always attempt to Patch the KubevirtMachine object and status after each reconciliation.
 	defer func() {
@@ -181,7 +172,6 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		controllerutil.AddFinalizer(kubevirtMachine, infrav1.MachineFinalizer)
 		return ctrl.Result{}, nil
 	}
-	log.Info("Reconcile - Added Finalizer")
 
 	// Check if the infrastructure is ready, otherwise return and wait for the cluster object to be updated
 	if !cluster.Status.InfrastructureReady {
@@ -189,15 +179,12 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		conditions.MarkFalse(kubevirtMachine, infrav1.VMProvisionedCondition, infrav1.WaitingForClusterInfrastructureReason, clusterv1.ConditionSeverityInfo, "Waiting for KubevirtCluster Controller to create cluster infrastructure")
 		return ctrl.Result{}, nil
 	}
-	// log.Info("Reconcile - 9")
 
 	// Handle non-deleted machines
 	res, err := r.reconcileNormal(machineContext)
-	// log.Info("Reconcile - 10")
 	log.Info(fmt.Sprintf("ReconcileNormal result: %v", res))
 
 	if err == nil && res.IsZero() {
-		// log.Info("Reconcile - 10.5")
 		// Update the providerID on the Node
 		// The ProviderID on the Node and the providerID on  the KubevirtMachine are used to set the NodeRef
 		// This code is needed here as long as there is no Kubevirt cloud provider setting the providerID in the node
@@ -211,7 +198,6 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		}
 
 	}
-	// log.Info("Reconcile - 11")
 
 	return res, err
 }
@@ -231,7 +217,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		return ctrl.Result{}, nil
 	}
 
-	ctx.Logger.Info("reconcileNormal - 1")
 	// Fetch SSH keys to be used for cluster nodes, and update bootstrap script cloud-init with public key
 	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
 
@@ -245,7 +230,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 			return ctrl.Result{}, errors.Wrap(err, "failed to fetch ssh keys for cluster nodes")
 		}
 	}
-	// ctx.Logger.Info("reconcileNormal - 2")
 
 	// Default the infra cluster secret ref when the
 	// machine does not have one set.
@@ -253,12 +237,10 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Spec.InfraClusterSecretRef = ctx.KubevirtCluster.Spec.InfraClusterSecretRef
 	}
 
-	// ctx.Logger.Info("reconcileNormal - 3")
 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
 	if err != nil {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to generate infra cluster client")
 	}
-	// ctx.Logger.Info("reconcileNormal - 4")
 
 	// If there is not a namespace explicitly set on the vm template, then
 	// use the infra namespace as a default. For internal clusters, the infraNamespace
@@ -269,26 +251,22 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	if vmNamespace == "" {
 		vmNamespace = infraClusterNamespace
 	}
-	// ctx.Logger.Info("reconcileNormal - 5")
 
 	if infraClusterClient == nil {
 		ctx.Logger.Info("Waiting for infra cluster client...")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
-	// ctx.Logger.Info("reconcileNormal - 6")
 
 	if err := r.reconcileKubevirtBootstrapSecret(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys); err != nil {
 		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMProvisionedCondition, infrav1.WaitingForBootstrapDataReason, clusterv1.ConditionSeverityInfo, "Failed to fetch kubevirt bootstrap secret")
 		return ctrl.Result{}, errors.Wrap(err, "failed to fetch kubevirt bootstrap secret")
 	}
-	// ctx.Logger.Info("reconcileNormal - 7")
 
 	// Create a helper for managing the KubeVirt VM hosting the machine.
 	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
 	}
-	// ctx.Logger.Info("reconcileNormal - 8")
 
 	isTerminal, terminalReason, err := externalMachine.IsTerminal()
 	if err != nil {
@@ -299,7 +277,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.KubevirtMachine.Status.FailureReason = &failureErr
 		ctx.KubevirtMachine.Status.FailureMessage = &terminalReason
 	}
-	// ctx.Logger.Info("reconcileNormal - 9")
 
 	// Provision the underlying VM if not existing
 	if !isTerminal && !externalMachine.Exists() {
@@ -313,7 +290,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.Logger.Info("Start time: ", "start", start.Format(time.RFC3339))
 		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 	}
-	ctx.Logger.Info("reconcileNormal - 10")
 
 	if ctx.KubevirtMachine.Spec.ProviderID == nil || *ctx.KubevirtMachine.Spec.ProviderID == "" {
 		providerID, err := externalMachine.GenerateProviderID()
@@ -324,7 +300,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 
 		// Set ProviderID so the Cluster API Machine Controller can pull it.
 		ctx.KubevirtMachine.Spec.ProviderID = &providerID
-		ctx.Logger.Info("reconcileNormal - Set provider ID done")
+		ctx.Logger.Info("ProviderID is set on the KubevirtMachine")
 	}
 
 	// // Checks to see if a VM's active VMI is ready or not
@@ -343,7 +319,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		ctx.Logger.Info("KubeVirt VM is not fully provisioned and running...")
 		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 	}
-	ctx.Logger.Info("reconcileNormal - 11")
 
 	ipAddress := externalMachine.Address()
 	if ipAddress == "" {
@@ -411,7 +386,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 
 		ctx.KubevirtMachine.Status.Conditions = append(ctx.KubevirtMachine.Status.Conditions, *capicondition)
 	}
-	ctx.Logger.Info("reconcileNormal - 13")
 
 	// Ready should reflect if the VMI is ready or not
 	if externalMachine.IsRunning() {
@@ -419,7 +393,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	} else {
 		ctx.KubevirtMachine.Status.Ready = false
 	}
-	ctx.Logger.Info("reconcileNormal - 14")
 
 	liveMigratable, reason, message, err := externalMachine.IsLiveMigratable()
 	if err != nil {
@@ -769,15 +742,15 @@ func (r *KubevirtMachineReconciler) SetupWithManager(goctx gocontext.Context, mg
 	if err != nil {
 		return err
 	}
-	eventSource := source.Channel(machineControllerChan, &handler.EnqueueRequestForObject{})
+	// eventSource := source.Channel(machineControllerChan, &handler.EnqueueRequestForObject{})
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrav1.KubevirtMachine{}).
 		WithOptions(options).
 		WithEventFilter(predicates.ResourceNotPaused(r.Scheme(), ctrl.LoggerFrom(goctx))).
-		WatchesRawSource(
-			eventSource,
-		).
+		// WatchesRawSource(
+		// 	eventSource,
+		// ).
 		Watches(
 			&clusterv1.Machine{},
 			handler.EnqueueRequestsFromMapFunc(util.MachineToInfrastructureMapFunc(infrav1.GroupVersion.WithKind("KubevirtMachine"))),
