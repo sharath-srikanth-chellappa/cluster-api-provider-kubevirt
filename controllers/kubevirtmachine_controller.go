@@ -188,15 +188,7 @@ func (r *KubevirtMachineReconciler) Reconcile(goctx gocontext.Context, req ctrl.
 		// Update the providerID on the Node
 		// The ProviderID on the Node and the providerID on  the KubevirtMachine are used to set the NodeRef
 		// This code is needed here as long as there is no Kubevirt cloud provider setting the providerID in the node
-		if providerIdResult, providerIdErr := r.updateNodeProviderID(machineContext); providerIdErr != nil {
-			log.Info("Node provider ID update failed, will retry in next reconciliation", "error", providerIdErr)
-			log.Info("Node providerID update result: ", "result", providerIdResult)
-			return ctrl.Result{}, nil
-		} else if !providerIdResult.IsZero() {
-			// If updateNodeProviderID wants to requeue, respect that
-			return providerIdResult, nil
-		}
-
+		return r.updateNodeProviderID(machineContext)
 	}
 
 	return res, err
@@ -286,21 +278,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 			return ctrl.Result{}, errors.Wrap(err, "failed to create VM instance")
 		}
 		ctx.Logger.Info("VM Created, waiting on vm to be provisioned.")
-		start := time.Now()
-		ctx.Logger.Info("Start time: ", "start", start.Format(time.RFC3339))
 		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
-	}
-
-	if ctx.KubevirtMachine.Spec.ProviderID == nil || *ctx.KubevirtMachine.Spec.ProviderID == "" {
-		providerID, err := externalMachine.GenerateProviderID()
-		if err != nil {
-			ctx.Logger.Error(err, "Failed to patch node with provider id.")
-			return ctrl.Result{}, nil
-		}
-
-		// Set ProviderID so the Cluster API Machine Controller can pull it.
-		ctx.KubevirtMachine.Spec.ProviderID = &providerID
-		ctx.Logger.Info("ProviderID is set on the KubevirtMachine")
 	}
 
 	// // Checks to see if a VM's active VMI is ready or not
@@ -376,6 +354,18 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		},
 	}
 
+	if ctx.KubevirtMachine.Spec.ProviderID == nil || *ctx.KubevirtMachine.Spec.ProviderID == "" {
+		providerID, err := externalMachine.GenerateProviderID()
+		if err != nil {
+			ctx.Logger.Error(err, "Failed to patch node with provider id.")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+
+		// Set ProviderID so the Cluster API Machine Controller can pull it.
+		ctx.KubevirtMachine.Spec.ProviderID = &providerID
+		ctx.Logger.Info("ProviderID is set on the KubevirtMachine")
+	}
+
 	// Update the conditions with the ones from the external machine
 	kubevirtVmConditions := externalMachine.GetConditions()
 	for i := range kubevirtVmConditions {
@@ -438,7 +428,7 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	}
 	if workloadClusterClient == nil {
 		ctx.Logger.Info("Waiting for workload cluster client...")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	nodeList := &corev1.NodeList{}

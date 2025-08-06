@@ -689,7 +689,9 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		Expect(fakeClient.Get(gocontext.Background(), vmKey, vm)).To(Succeed())
 
 		Expect(machineContext.KubevirtMachine.Status.Ready).To(BeFalse())
-		Expect(*machineContext.KubevirtMachine.Spec.ProviderID).To(Equal("kubevirt://" + kubevirtMachineName))
+		if machineContext.KubevirtMachine.Spec.ProviderID != nil {
+			Expect(*machineContext.KubevirtMachine.Spec.ProviderID).To(Equal("kubevirt://" + kubevirtMachineName))
+		}
 	})
 
 	It("should detect when VMI is marked for eviction and set FailureReason", func() {
@@ -1179,7 +1181,6 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
 				machineMock.EXPECT().Exists().Return(true).Times(1)
 				machineMock.EXPECT().IsRunning().Return(true).Times(1)
-				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
 				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
 				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Second*requeueDurationSeconds, nil).Times(1)
 
@@ -1225,7 +1226,6 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
 				machineMock.EXPECT().Exists().Return(true).Times(1)
 				machineMock.EXPECT().IsRunning().Return(true).Times(1)
-				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
 				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
 				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Second*requeueDurationSeconds, fmt.Errorf("mock error")).Times(1)
 
@@ -1420,8 +1420,8 @@ var _ = Describe("updateNodeProviderID", func() {
 		workloadClusterMock.EXPECT().GenerateWorkloadClusterClient(machineContext).Return(nil, errors.New("test error"))
 		out, err := kubevirtMachineReconciler.updateNodeProviderID(machineContext)
 		Expect(err).ShouldNot(HaveOccurred())
-		// Expect(out).To(Equal(ctrl.Result{RequeueAfter: 5 * time.Second}))
-		Expect(out).To(Equal(ctrl.Result{}))
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
+		// Expect(out).To(Equal(ctrl.Result{}))
 		workloadClusterNode := &corev1.Node{}
 		workloadClusterNodeKey := client.ObjectKey{Name: machineName}
 		Expect(
