@@ -409,7 +409,8 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 
 		machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
 		machineMock.EXPECT().Exists().Return(true).Times(1)
-		machineMock.EXPECT().IsRunning().Return(false).AnyTimes()
+		// machineMock.EXPECT().IsRunning().Return(false).AnyTimes()
+		machineMock.EXPECT().IsReady().Return(false).AnyTimes()
 		machineMock.EXPECT().GetVMNotReadyReason().Return("WaitingForBoot", "VM is booting").AnyTimes()
 		machineMock.EXPECT().Address().Return("1.1.1.1").AnyTimes()
 		machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(false).AnyTimes()
@@ -681,17 +682,15 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 		Expect(err).ShouldNot(HaveOccurred())
 
 		// should expect to re-enqueue while waiting for VMI to come online
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 20 * time.Second}))
+		Expect(out).To(Equal(ctrl.Result{}))
 
 		// should expect VM to be created with expected name
 		vm := &kubevirtv1.VirtualMachine{}
 		vmKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: kubevirtMachine.Name}
 		Expect(fakeClient.Get(gocontext.Background(), vmKey, vm)).To(Succeed())
 
-		Expect(machineContext.KubevirtMachine.Status.Ready).To(BeFalse())
-		if machineContext.KubevirtMachine.Spec.ProviderID != nil {
-			Expect(*machineContext.KubevirtMachine.Spec.ProviderID).To(Equal("kubevirt://" + kubevirtMachineName))
-		}
+		Expect(machineContext.KubevirtMachine.Status.Ready).To(BeTrue())
+		Expect(*machineContext.KubevirtMachine.Spec.ProviderID).To(Equal("kubevirt://" + kubevirtMachineName))
 	})
 
 	It("should detect when VMI is marked for eviction and set FailureReason", func() {
@@ -965,7 +964,8 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 
 				setupClient(machineFactoryMock, objects)
 
-				machineMock.EXPECT().IsRunning().Return(true).Times(2)
+				// machineMock.EXPECT().IsRunning().Return(true).Times(2)
+				machineMock.EXPECT().IsReady().Return(true).Times(2)
 				machineMock.EXPECT().GetConditions().Return([]kubevirtv1.VirtualMachineCondition{}).Times(1)
 				machineMock.EXPECT().IsBootstrapped().Return(true).AnyTimes()
 				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
@@ -1018,7 +1018,8 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
 				machineMock.EXPECT().Exists().Return(true).Times(1)
 				machineMock.EXPECT().Create(nil).Return(nil).AnyTimes()
-				machineMock.EXPECT().IsRunning().Return(true).Times(1)
+				// machineMock.EXPECT().IsRunning().Return(true).Times(1)
+				machineMock.EXPECT().IsReady().Return(true).Times(1)
 				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
 				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).AnyTimes()
 				machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(true)
@@ -1068,7 +1069,8 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 
 				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
 				machineMock.EXPECT().Exists().Return(true).Times(1)
-				machineMock.EXPECT().IsRunning().Return(true).Times(2)
+				// machineMock.EXPECT().IsRunning().Return(true).Times(2)
+				machineMock.EXPECT().IsReady().Return(true).Times(2)
 				machineMock.EXPECT().GetConditions().Return([]kubevirtv1.VirtualMachineCondition{}).Times(1)
 				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
 				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
@@ -1126,7 +1128,8 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
 				machineMock.EXPECT().Exists().Return(true).Times(1)
 				machineMock.EXPECT().GetConditions().Return([]kubevirtv1.VirtualMachineCondition{}).Times(1)
-				machineMock.EXPECT().IsRunning().Return(true).Times(2)
+				// machineMock.EXPECT().IsRunning().Return(true).Times(2)
+				machineMock.EXPECT().IsReady().Return(true).Times(2)
 				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
 				machineMock.EXPECT().GenerateProviderID().Return("abc", nil).Times(1)
 				machineMock.EXPECT().SupportsCheckingIsBootstrapped().Return(true)
@@ -1180,7 +1183,8 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 				const requeueDurationSeconds = 3
 				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
 				machineMock.EXPECT().Exists().Return(true).Times(1)
-				machineMock.EXPECT().IsRunning().Return(true).Times(1)
+				// machineMock.EXPECT().IsRunning().Return(true).Times(1)
+				machineMock.EXPECT().IsReady().Return(true).Times(1)
 				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
 				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Second*requeueDurationSeconds, nil).Times(1)
 
@@ -1225,7 +1229,8 @@ var _ = Describe("reconcile a kubevirt machine", func() {
 				const requeueDurationSeconds = 3
 				machineMock.EXPECT().IsTerminal().Return(false, "", nil).Times(1)
 				machineMock.EXPECT().Exists().Return(true).Times(1)
-				machineMock.EXPECT().IsRunning().Return(true).Times(1)
+				// machineMock.EXPECT().IsRunning().Return(true).Times(1)
+				machineMock.EXPECT().IsReady().Return(true).Times(1)
 				machineMock.EXPECT().Address().Return("1.1.1.1").Times(1)
 				machineMock.EXPECT().DrainNodeIfNeeded(gomock.Any()).Return(time.Second*requeueDurationSeconds, fmt.Errorf("mock error")).Times(1)
 
@@ -1450,7 +1455,7 @@ var _ = Describe("updateNodeProviderID", func() {
 		Expect(err).Should(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("API server returned not found"))
 		// No requeue expected since it's an error
-		Expect(out).To(Equal(ctrl.Result{}))
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 5 * time.Second}))
 		workloadClusterNode := &corev1.Node{}
 		workloadClusterNodeKey := client.ObjectKey{Name: machineName}
 		Expect(

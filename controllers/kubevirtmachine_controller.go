@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	apitypes "k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	capierrors "sigs.k8s.io/cluster-api/errors"
 	"sigs.k8s.io/cluster-api/util"
@@ -44,9 +45,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	kubevirtv1 "kubevirt.io/api/core/v1"
 	infrav1 "sigs.k8s.io/cluster-api-provider-kubevirt/api/v1alpha1"
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/context"
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/infracluster"
@@ -281,10 +280,10 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 	}
 
-	// // Checks to see if a VM's active VMI is ready or not
-	// if externalMachine.IsReady() {
-	// We are slightly modifying this check to see if the VM's active VMI is running or not so that the reconcilation is faster
-	if externalMachine.IsRunning() {
+	// Checks to see if a VM's active VMI is ready or not
+	if externalMachine.IsReady() {
+		// // We are slightly modifying this check to see if the VM's active VMI is running or not so that the reconcilation is faster
+		// if externalMachine.IsRunning() {
 		// Mark VMProvisionedCondition to indicate that the VM has successfully started
 		conditions.MarkTrue(ctx.KubevirtMachine, infrav1.VMProvisionedCondition)
 	} else {
@@ -371,14 +370,15 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	for i := range kubevirtVmConditions {
 		capicondition, err := convertKubeVirtVMConditionToCapiCondition(&kubevirtVmConditions[i])
 		if err != nil {
-			return reconcile.Result{}, err
+			return ctrl.Result{}, err
 		}
 
 		ctx.KubevirtMachine.Status.Conditions = append(ctx.KubevirtMachine.Status.Conditions, *capicondition)
 	}
 
 	// Ready should reflect if the VMI is ready or not
-	if externalMachine.IsRunning() {
+	if externalMachine.IsReady() {
+		// if externalMachine.IsRunning() {
 		ctx.KubevirtMachine.Status.Ready = true
 	} else {
 		ctx.KubevirtMachine.Status.Ready = false
@@ -444,19 +444,6 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 			Name: ctx.Machine.Name,
 		},
 	}
-	// workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
-	// if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
-	// 	if apierrors.IsNotFound(err) {
-	// 		ctx.Logger.Info(fmt.Sprintf("Waiting for workload cluster node to appear for machine %s/%s...", ctx.KubevirtMachine.Namespace, ctx.KubevirtMachine.Name))
-	// 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	// 	} else {
-	// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
-	// 	}
-	// }
-	// if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
-	// 	// Node is already updated, return
-	// 	return ctrl.Result{}, nil
-	// }
 
 	// Create a helper for managing the KubeVirt VM hosting the machine.
 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
@@ -509,9 +496,9 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	if err := workloadClusterClient.Patch(ctx, workloadClusterNode, mergePatch); err != nil {
 		if apierrors.IsNotFound(err) {
 			ctx.Logger.Error(err, "API server returned not found")
-			return ctrl.Result{}, errors.Wrap(err, "API server returned not found")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "API server returned not found")
 		}
-		return ctrl.Result{}, errors.Wrapf(err, "failed to patch workload cluster node")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
 	}
 	ctx.KubevirtMachine.Status.NodeUpdated = true
 
