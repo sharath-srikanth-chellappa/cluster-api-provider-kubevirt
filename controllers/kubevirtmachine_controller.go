@@ -18,7 +18,6 @@ package controllers
 
 import (
 	gocontext "context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"time"
@@ -29,7 +28,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	apitypes "k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -250,7 +248,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 
 	if err := r.reconcileKubevirtBootstrapSecret(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys); err != nil {
 		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMProvisionedCondition, infrav1.WaitingForBootstrapDataReason, clusterv1.ConditionSeverityInfo, "Failed to fetch kubevirt bootstrap secret")
-		return ctrl.Result{}, errors.Wrap(err, "failed to fetch kubevirt bootstrap secret")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to fetch kubevirt bootstrap secret")
 	}
 
 	// Create a helper for managing the KubeVirt VM hosting the machine.
@@ -292,7 +290,6 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 
 		// Waiting for VM to boot
 		ctx.KubevirtMachine.Status.Ready = false
-		ctx.Logger.Info(fmt.Sprintf("Reason that it is not fully provisioned: %s", reason))
 		ctx.Logger.Info("KubeVirt VM is not fully provisioned and running...")
 		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 	}
@@ -416,6 +413,124 @@ type JSONPatchOp struct {
 	Value     string `json:"value"`
 }
 
+// My Method. Just commented in case of rollback.
+// func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineContext) (ctrl.Result, error) {
+// 	// If the provider ID is already updated on the Node, return
+// 	if ctx.KubevirtMachine.Status.NodeUpdated {
+// 		return ctrl.Result{}, nil
+// 	}
+
+// 	workloadClusterClient, err := r.WorkloadCluster.GenerateWorkloadClusterClient(ctx)
+// 	if err != nil {
+// 		ctx.Logger.Error(err, "Workload cluster client is not available")
+// 	}
+// 	if workloadClusterClient == nil {
+// 		ctx.Logger.Info("Waiting for workload cluster client...")
+// 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+// 	}
+
+// 	nodeList := &corev1.NodeList{}
+// 	if err := workloadClusterClient.List(ctx.ClusterContext(), nodeList); err != nil {
+// 		ctx.Logger.Error(err, "Failed to list nodes")
+// 		ctx.Logger.Info("Waiting for workload cluster to list nodes...")
+// 		return ctrl.Result{}, nil
+// 	}
+
+// 	// using workload cluster client, get the corresponding cluster node
+// 	workloadClusterNode := &corev1.Node{
+// 		ObjectMeta: metav1.ObjectMeta{
+// 			Name: ctx.Machine.Name,
+// 		},
+// 	}
+
+// 	// Create a helper for managing the KubeVirt VM hosting the machine.
+// 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
+// 	if err != nil {
+// 		return ctrl.Result{}, errors.Wrap(err, "failed to generate infra cluster client")
+// 	}
+// 	// If there is not a namespace explicitly set on the vm template, then
+// 	// use the infra namespace as a default. For internal clusters, the infraNamespace
+// 	// will be the same as the KubeVirtCluster object, for external clusters the
+// 	// infraNamespace will attempt to be detected from the infraClusterSecretRef's
+// 	// kubeconfig
+// 	vmNamespace := ctx.KubevirtMachine.Spec.VirtualMachineTemplate.ObjectMeta.Namespace
+// 	if vmNamespace == "" {
+// 		vmNamespace = infraClusterNamespace
+// 	}
+// 	if infraClusterClient == nil {
+// 		ctx.Logger.Info("Waiting for infra cluster client...")
+// 		return ctrl.Result{}, nil
+// 	}
+// 	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
+
+// 	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
+// 	if err != nil {
+// 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
+// 	}
+
+// 	vmiHostName := externalMachine.Node()
+// 	if vmiHostName == "" {
+// 		return ctrl.Result{}, errors.New("failed to get the hostname of the VM")
+// 	}
+
+// 	patch := []JSONPatchOp{{
+// 		Operation: "replace",
+// 		Path:      "/metadata/labels/topology.kubernetes.io~1baremetalmachine",
+// 		Value:     vmiHostName,
+// 	}}
+
+// 	serializedPatch, err := json.Marshal(patch)
+// 	if err != nil {
+// 		return ctrl.Result{}, errors.Wrap(err, "failed to serialize patch into json")
+// 	}
+
+// 	// Patch node with provider id.
+// 	// Usually a cloud provider will do this, but there is no cloud provider for KubeVirt.
+// 	ctx.Logger.Info("Patching node with provider id...")
+
+// 	// using workload cluster client, patch cluster node
+// 	patchStr := fmt.Sprintf(`{"spec": {"providerID": "%s"}}`, *ctx.KubevirtMachine.Spec.ProviderID)
+// 	mergePatch := client.RawPatch(types.MergePatchType, []byte(patchStr))
+// 	if err := workloadClusterClient.Patch(ctx, workloadClusterNode, mergePatch); err != nil {
+// 		if apierrors.IsNotFound(err) {
+// 			ctx.Logger.Error(err, "API server returned not found")
+// 			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "API server returned not found")
+// 		}
+// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
+// 	}
+// 	ctx.KubevirtMachine.Status.NodeUpdated = true
+
+// 	// Patch node with baremetal host label.
+// 	ctx.Logger.Info("Patching node with baremetal host label...")
+
+// 	// Handle final error after all retries
+// 	err = workloadClusterClient.Patch(ctx, workloadClusterNode, client.RawPatch(apitypes.JSONPatchType, serializedPatch))
+// 	if err != nil {
+// 		if apierrors.IsNotFound(err) {
+// 			ctx.Logger.Error(err, "API server returned not found")
+// 			return ctrl.Result{}, errors.Wrap(err, "API server returned not found")
+// 		}
+// 		ctx.Logger.Error(err, "failed to patch worker cluster node")
+// 		return ctrl.Result{}, errors.Wrap(err, "failed to patch worker cluster node")
+// 	}
+
+// 	ctx.Logger.Info("Node is patched with provider id and the NodeUpdated status is set to true")
+
+// 	return ctrl.Result{}, nil
+// }
+
+func convertKubeVirtVMConditionToCapiCondition(kvcondition *kubevirtv1.VirtualMachineCondition) (*clusterv1.Condition, error) {
+	capicondition := clusterv1.Condition{
+		Type:               clusterv1.ConditionType(kvcondition.Type),
+		Status:             kvcondition.Status,
+		LastTransitionTime: kvcondition.LastTransitionTime,
+		Reason:             kvcondition.Reason,
+		Message:            kvcondition.Message,
+	}
+	return &capicondition, nil
+}
+
+// Commenting out this code to propose an alternative reconcilation flow
 func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineContext) (ctrl.Result, error) {
 	// If the provider ID is already updated on the Node, return
 	if ctx.KubevirtMachine.Status.NodeUpdated {
@@ -431,59 +546,21 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	nodeList := &corev1.NodeList{}
-	if err := workloadClusterClient.List(ctx.ClusterContext(), nodeList); err != nil {
-		ctx.Logger.Error(err, "Failed to list nodes")
-		ctx.Logger.Info("Waiting for workload cluster to list nodes...")
-		return ctrl.Result{}, nil
-	}
-
 	// using workload cluster client, get the corresponding cluster node
-	workloadClusterNode := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: ctx.Machine.Name,
-		},
+	workloadClusterNode := &corev1.Node{}
+	workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
+	if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
+		if apierrors.IsNotFound(err) {
+			ctx.Logger.Info(fmt.Sprintf("Waiting for workload cluster node to appear for machine %s/%s...", ctx.KubevirtMachine.Namespace, ctx.KubevirtMachine.Name))
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		} else {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
+		}
 	}
 
-	// Create a helper for managing the KubeVirt VM hosting the machine.
-	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrap(err, "failed to generate infra cluster client")
-	}
-	// If there is not a namespace explicitly set on the vm template, then
-	// use the infra namespace as a default. For internal clusters, the infraNamespace
-	// will be the same as the KubeVirtCluster object, for external clusters the
-	// infraNamespace will attempt to be detected from the infraClusterSecretRef's
-	// kubeconfig
-	vmNamespace := ctx.KubevirtMachine.Spec.VirtualMachineTemplate.ObjectMeta.Namespace
-	if vmNamespace == "" {
-		vmNamespace = infraClusterNamespace
-	}
-	if infraClusterClient == nil {
-		ctx.Logger.Info("Waiting for infra cluster client...")
+	if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
+		// Node is already updated, return
 		return ctrl.Result{}, nil
-	}
-	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
-
-	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
-	}
-
-	vmiHostName := externalMachine.Node()
-	if vmiHostName == "" {
-		return ctrl.Result{}, errors.New("failed to get the hostname of the VM")
-	}
-
-	patch := []JSONPatchOp{{
-		Operation: "replace",
-		Path:      "/metadata/labels/topology.kubernetes.io~1baremetalmachine",
-		Value:     vmiHostName,
-	}}
-
-	serializedPatch, err := json.Marshal(patch)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrap(err, "failed to serialize patch into json")
 	}
 
 	// Patch node with provider id.
@@ -494,166 +571,12 @@ func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineCon
 	patchStr := fmt.Sprintf(`{"spec": {"providerID": "%s"}}`, *ctx.KubevirtMachine.Spec.ProviderID)
 	mergePatch := client.RawPatch(types.MergePatchType, []byte(patchStr))
 	if err := workloadClusterClient.Patch(ctx, workloadClusterNode, mergePatch); err != nil {
-		if apierrors.IsNotFound(err) {
-			ctx.Logger.Error(err, "API server returned not found")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "API server returned not found")
-		}
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
 	}
 	ctx.KubevirtMachine.Status.NodeUpdated = true
 
-	// Patch node with baremetal host label.
-	ctx.Logger.Info("Patching node with baremetal host label...")
-
-	// Handle final error after all retries
-	err = workloadClusterClient.Patch(ctx, workloadClusterNode, client.RawPatch(apitypes.JSONPatchType, serializedPatch))
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			ctx.Logger.Error(err, "API server returned not found")
-			return ctrl.Result{}, errors.Wrap(err, "API server returned not found")
-		}
-		ctx.Logger.Error(err, "failed to patch worker cluster node")
-		return ctrl.Result{}, errors.Wrap(err, "failed to patch worker cluster node")
-	}
-
-	ctx.Logger.Info("Node is patched with provider id and the NodeUpdated status is set to true")
-
 	return ctrl.Result{}, nil
 }
-
-func convertKubeVirtVMConditionToCapiCondition(kvcondition *kubevirtv1.VirtualMachineCondition) (*clusterv1.Condition, error) {
-	capicondition := clusterv1.Condition{
-		Type:               clusterv1.ConditionType(kvcondition.Type),
-		Status:             kvcondition.Status,
-		LastTransitionTime: kvcondition.LastTransitionTime,
-		Reason:             kvcondition.Reason,
-		Message:            kvcondition.Message,
-	}
-	return &capicondition, nil
-}
-
-// Commenting out this code to propose an alternative reconcilation flow
-// func (r *KubevirtMachineReconciler) updateNodeProviderID(ctx *context.MachineContext) (ctrl.Result, error) {
-// 	// If the provider ID is already updated on the Node, return
-// 	if ctx.KubevirtMachine.Status.NodeUpdated {
-// 		return ctrl.Result{}, nil
-// 	}
-
-// 	workloadClusterClient, err := r.WorkloadCluster.GenerateWorkloadClusterClient(ctx)
-// 	if err != nil {
-// 		ctx.Logger.Error(err, "Workload cluster client is not available")
-// 	}
-// 	if workloadClusterClient == nil {
-// 		ctx.Logger.Info("Waiting for workload cluster client...")
-// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-// 	}
-
-// 	// using workload cluster client, get the corresponding cluster node
-// 	workloadClusterNode := &corev1.Node{}
-// 	workloadClusterNodeKey := client.ObjectKey{Namespace: ctx.KubevirtMachine.Namespace, Name: ctx.KubevirtMachine.Name}
-// 	if err := workloadClusterClient.Get(ctx, workloadClusterNodeKey, workloadClusterNode); err != nil {
-// 		if apierrors.IsNotFound(err) {
-// 			ctx.Logger.Info(fmt.Sprintf("Waiting for workload cluster node to appear for machine %s/%s...", ctx.KubevirtMachine.Namespace, ctx.KubevirtMachine.Name))
-// 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-// 		} else {
-// 			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to fetch workload cluster node")
-// 		}
-// 	}
-// 	if workloadClusterNode.Spec.ProviderID == *ctx.KubevirtMachine.Spec.ProviderID {
-// 		// Node is already updated, return
-// 		return ctrl.Result{}, nil
-// 	}
-
-// 	// Create a helper for managing the KubeVirt VM hosting the machine.
-// 	infraClusterClient, infraClusterNamespace, err := r.InfraCluster.GenerateInfraClusterClient(ctx.KubevirtMachine.Spec.InfraClusterSecretRef, ctx.KubevirtMachine.Namespace, ctx.Context)
-// 	if err != nil {
-// 		return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to generate infra cluster client")
-// 	}
-// 	// If there is not a namespace explicitly set on the vm template, then
-// 	// use the infra namespace as a default. For internal clusters, the infraNamespace
-// 	// will be the same as the KubeVirtCluster object, for external clusters the
-// 	// infraNamespace will attempt to be detected from the infraClusterSecretRef's
-// 	// kubeconfig
-// 	vmNamespace := ctx.KubevirtMachine.Spec.VirtualMachineTemplate.ObjectMeta.Namespace
-// 	if vmNamespace == "" {
-// 		vmNamespace = infraClusterNamespace
-// 	}
-// 	if infraClusterClient == nil {
-// 		ctx.Logger.Info("Waiting for infra cluster client...")
-// 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-// 	}
-// 	var clusterNodeSshKeys *ssh.ClusterNodeSshKeys
-
-// 	externalMachine, err := r.MachineFactory.NewMachine(ctx, infraClusterClient, vmNamespace, clusterNodeSshKeys)
-// 	if err != nil {
-// 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
-// 	}
-
-// 	vmiHostName := externalMachine.Node()
-// 	if vmiHostName == "" {
-// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.New("failed to get the hostname of the VM")
-// 	}
-
-// 	patch := []JSONPatchOp{{
-// 		Operation: "replace",
-// 		Path:      "/metadata/labels/topology.kubernetes.io~1baremetalmachine",
-// 		Value:     vmiHostName,
-// 	}}
-
-// 	serializedPatch, err := json.Marshal(patch)
-// 	if err != nil {
-// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to serialize patch into json")
-// 	}
-
-// 	// Patch node with provider id.
-// 	ctx.Logger.Info("Patching node with baremetal host label...")
-
-// 	const maxRetries = 3
-// 	const retryDelay = 3 * time.Second
-// 	for attempt := 1; attempt <= maxRetries; attempt++ {
-// 		err = workloadClusterClient.Patch(ctx, workloadClusterNode, client.RawPatch(apitypes.JSONPatchType, serializedPatch))
-// 		if err == nil {
-// 			// Success, break out of retry loop
-// 			break
-// 		}
-
-// 		// Log the attempt
-// 		ctx.Logger.Error(err, "patch attempt failed", "attempt", attempt, "maxRetries", maxRetries)
-
-// 		// If this was the last attempt, don't sleep
-// 		if attempt == maxRetries {
-// 			break
-// 		}
-
-// 		// Sleep before next attempt
-// 		time.Sleep(retryDelay)
-// 	}
-
-// 	// Handle final error after all retries
-// 	if err != nil {
-// 		if apierrors.IsNotFound(err) {
-// 			ctx.Logger.Error(err, "API server returned not found error after all retries")
-// 			return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "API server returned not found error after retries")
-// 		}
-// 		ctx.Logger.Error(err, "failed to patch worker cluster node after all retries")
-// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrap(err, "failed to patch worker cluster node after retries")
-// 	}
-
-// 	// Patch node with provider id.
-// 	// Usually a cloud provider will do this, but there is no cloud provider for KubeVirt.
-// 	ctx.Logger.Info("Patching node with provider id...")
-
-// 	// using workload cluster client, patch cluster node
-// 	patchStr := fmt.Sprintf(`{"spec": {"providerID": "%s"}}`, *ctx.KubevirtMachine.Spec.ProviderID)
-// 	mergePatch := client.RawPatch(types.MergePatchType, []byte(patchStr))
-// 	if err := workloadClusterClient.Patch(ctx, workloadClusterNode, mergePatch); err != nil {
-// 		return ctrl.Result{RequeueAfter: 5 * time.Second}, errors.Wrapf(err, "failed to patch workload cluster node")
-// 	}
-// 	ctx.KubevirtMachine.Status.NodeUpdated = true
-// 	ctx.Logger.Info("Node is patched with provider id and the NodeUpdated status is set to true")
-
-// 	return ctrl.Result{}, nil
-// }
 
 func (r *KubevirtMachineReconciler) reconcileDelete(ctx *context.MachineContext) (ctrl.Result, error) {
 

@@ -33,7 +33,6 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/kubevirt"
-	"sigs.k8s.io/cluster-api-provider-kubevirt/pkg/ssh"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
@@ -1344,7 +1343,6 @@ var _ = Describe("updateNodeProviderID", func() {
 		workloadClusterMock *workloadclustermock.MockWorkloadCluster
 		infraClusterMock    *infraclustermock.MockInfraCluster
 		machineFactoryMock  *machinemocks.MockMachineFactory
-		machineMock         *machinemocks.MockMachineInterface
 		testLogger          = ctrl.Log.WithName("test")
 		expectedProviderId  = "aa-66@test"
 	)
@@ -1354,7 +1352,6 @@ var _ = Describe("updateNodeProviderID", func() {
 		workloadClusterMock = workloadclustermock.NewMockWorkloadCluster(mockCtrl)
 		infraClusterMock = infraclustermock.NewMockInfraCluster(mockCtrl)
 		machineFactoryMock = machinemocks.NewMockMachineFactory(mockCtrl)
-		machineMock = machinemocks.NewMockMachineInterface(mockCtrl)
 
 		clusterName = "test-cluster"
 		machineName = "test-machine"
@@ -1384,7 +1381,7 @@ var _ = Describe("updateNodeProviderID", func() {
 					APIVersion: "v1",
 				},
 				ObjectMeta: metav1.ObjectMeta{
-					Name: machineName,
+					Name: kubevirtMachineName,
 					Labels: map[string]string{
 						"topology.kubernetes.io/baremetalmachine": "initial-value",
 					},
@@ -1399,18 +1396,12 @@ var _ = Describe("updateNodeProviderID", func() {
 	It("should set providerID to Node", func() {
 		kubevirtMachine.Spec.ProviderID = &expectedProviderId
 		machineContext := &context.MachineContext{Context: gocontext.Background(), KubevirtMachine: kubevirtMachine, Machine: machine, Logger: testLogger}
-		// Add the missing expectation for GenerateInfraClusterClient
-		infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachine.Spec.InfraClusterSecretRef, kubevirtMachine.Namespace, gomock.Any()).Return(fakeClient, kubevirtMachine.Namespace, nil)
-		// Mock the MachineFactory.NewMachine call
-		machineFactoryMock.EXPECT().NewMachine(machineContext, fakeClient, kubevirtMachine.Namespace, (*ssh.ClusterNodeSshKeys)(nil)).Return(machineMock, nil)
-		// Mock the machine.Node() call
-		machineMock.EXPECT().Node().Return(kubevirtMachineName)
 		workloadClusterMock.EXPECT().GenerateWorkloadClusterClient(machineContext).Return(fakeWorkloadClusterClient, nil)
 		out, err := kubevirtMachineReconciler.updateNodeProviderID(machineContext)
 		Expect(err).ShouldNot(HaveOccurred())
 		Expect(out).To(Equal(ctrl.Result{}))
 		workloadClusterNode := &corev1.Node{}
-		workloadClusterNodeKey := client.ObjectKey{Name: machineName}
+		workloadClusterNodeKey := client.ObjectKey{Name: kubevirtMachineName}
 		Expect(
 			fakeWorkloadClusterClient.Get(machineContext, workloadClusterNodeKey, workloadClusterNode),
 		).To(Succeed())
@@ -1428,7 +1419,7 @@ var _ = Describe("updateNodeProviderID", func() {
 		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
 		// Expect(out).To(Equal(ctrl.Result{}))
 		workloadClusterNode := &corev1.Node{}
-		workloadClusterNodeKey := client.ObjectKey{Name: machineName}
+		workloadClusterNodeKey := client.ObjectKey{Name: kubevirtMachineName}
 		Expect(
 			fakeWorkloadClusterClient.Get(machineContext, workloadClusterNodeKey, workloadClusterNode),
 		).To(Succeed())
@@ -1443,21 +1434,12 @@ var _ = Describe("updateNodeProviderID", func() {
 		// Create a machine for the non-existent kubevirt machine
 		anotherMachine := testing.NewMachine(clusterName, "test-machine-2", kubevirtMachineNotExist)
 		machineContext := &context.MachineContext{Context: gocontext.Background(), KubevirtMachine: kubevirtMachineNotExist, Machine: anotherMachine, Logger: testLogger}
-		// Add the missing expectation for GenerateInfraClusterClient
-		infraClusterMock.EXPECT().GenerateInfraClusterClient(kubevirtMachineNotExist.Spec.InfraClusterSecretRef, kubevirtMachineNotExist.Namespace, gomock.Any()).Return(fakeClient, kubevirtMachineNotExist.Namespace, nil)
-		// Mock the MachineFactory.NewMachine call
-		machineFactoryMock.EXPECT().NewMachine(machineContext, fakeClient, kubevirtMachine.Namespace, (*ssh.ClusterNodeSshKeys)(nil)).Return(machineMock, nil)
-		// Mock the machine.Node() call
-		machineMock.EXPECT().Node().Return("non-existent-node")
 		workloadClusterMock.EXPECT().GenerateWorkloadClusterClient(machineContext).Return(fakeWorkloadClusterClient, nil)
 		out, err := kubevirtMachineReconciler.updateNodeProviderID(machineContext)
-		// This should return an error because the node "test-machine-2" doesn't exist
-		Expect(err).Should(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("API server returned not found"))
-		// No requeue expected since it's an error
-		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 5 * time.Second}))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(out).To(Equal(ctrl.Result{RequeueAfter: 10 * time.Second}))
 		workloadClusterNode := &corev1.Node{}
-		workloadClusterNodeKey := client.ObjectKey{Name: machineName}
+		workloadClusterNodeKey := client.ObjectKey{Namespace: kubevirtMachine.Namespace, Name: kubevirtMachine.Name}
 		Expect(
 			fakeWorkloadClusterClient.Get(machineContext, workloadClusterNodeKey, workloadClusterNode),
 		).To(Succeed())
