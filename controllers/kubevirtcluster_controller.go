@@ -193,13 +193,13 @@ func (r *KubevirtClusterReconciler) reconcileNormal(ctx *context.ClusterContext,
 		if os.Getenv("FABRIC_HOST_OVERRIDE") == "" {
 			return ctrl.Result{}, errors.Errorf("NodePort selected but no FabricHostOverride specified")
 		}
-		if *ctx.Cluster.Spec.ClusterNetwork.APIServerPort == 0 {
-			conditions.MarkFalse(ctx.KubevirtCluster, infrav1.LoadBalancerAvailableCondition, infrav1.LoadBalancerProvisioningFailedReason, clusterv1.ConditionSeverityInfo, "Nodeport not yet available")
+		if externalLoadBalancer.GetNodePort() == 0 {
+			conditions.MarkFalse(ctx.KubevirtCluster, infrav1.LoadBalancerAvailableCondition, infrav1.LoadBalancerProvisioningFailedReason, clusterv1.ConditionSeverityWarning, "NodePort not yet available")
 			return ctrl.Result{}, errors.Errorf("failed to get NodePort for the load balancer")
 		}
 
 		lbip4 := os.Getenv("FABRIC_HOST_OVERRIDE")
-		port := *ctx.Cluster.Spec.ClusterNetwork.APIServerPort
+		port := externalLoadBalancer.GetNodePort()
 		ctx.KubevirtCluster.Spec.ControlPlaneEndpoint = infrav1.APIEndpoint{
 			Host: lbip4,
 			Port: int(port),

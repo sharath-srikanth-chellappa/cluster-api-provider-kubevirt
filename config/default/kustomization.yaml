@@ -12,6 +12,7 @@ commonLabels:
 
 resources:
   - namespace.yaml
+  - credentials.yaml
 
 bases:
   - ../crd
@@ -22,6 +23,7 @@ bases:
 
 patchesStrategicMerge:
   # Provide customizable hook for make targets.
+  - manager_credentials_patch.yaml
   - manager_image_patch.yaml
   - manager_pull_policy.yaml
   # Enable webhook.
