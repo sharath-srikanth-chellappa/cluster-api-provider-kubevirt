@@ -19,6 +19,7 @@ package controllers
 import (
 	gocontext "context"
 	"fmt"
+	"os"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -187,8 +188,23 @@ func (r *KubevirtClusterReconciler) reconcileNormal(ctx *context.ClusterContext,
 			Host: lbip4,
 			Port: 6443,
 		}
+		// Get NodePort if cluster Service Type is NodePort
+	} else if ctx.KubevirtCluster.Spec.ControlPlaneServiceTemplate.Spec.Type == "NodePort" {
+		if os.Getenv("FABRIC_HOST_OVERRIDE") == "" {
+			return ctrl.Result{}, errors.Errorf("NodePort selected but no FabricHostOverride specified")
+		}
+		if *ctx.Cluster.Spec.ClusterNetwork.APIServerPort == 0 {
+			conditions.MarkFalse(ctx.KubevirtCluster, infrav1.LoadBalancerAvailableCondition, infrav1.LoadBalancerProvisioningFailedReason, clusterv1.ConditionSeverityInfo, "Nodeport not yet available")
+			return ctrl.Result{}, errors.Errorf("failed to get NodePort for the load balancer")
+		}
 
-		// Get Cluster IP if cluster Service Type is CusterIP
+		lbip4 := os.Getenv("FABRIC_HOST_OVERRIDE")
+		port := *ctx.Cluster.Spec.ClusterNetwork.APIServerPort
+		ctx.KubevirtCluster.Spec.ControlPlaneEndpoint = infrav1.APIEndpoint{
+			Host: lbip4,
+			Port: int(port),
+		}
+		// Get Cluster IP if cluster Service Type is ClusterIP
 	} else {
 		lbip4, err := externalLoadBalancer.IP(ctx)
 		if err != nil {
