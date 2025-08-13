@@ -74,6 +74,12 @@ type KubevirtMachineStatus struct {
 	// +kubebuilder:default=false
 	Ready bool `json:"ready"`
 
+	// Started is true when the provider resource at any point of time during its lifecycle was ready.
+	// We initially set default to true to ensure that if we are upgrading from a capkv without this parameter,
+	// we don't accidentally delete the VM Object.
+	// This value however will be explicitly set to false, everytime a new KubevirtMachine is created.
+	Started bool `json:"started"`
+
 	// LoadBalancerConfigured denotes that the machine has been
 	// added to the load balancer
 	// +optional
@@ -136,6 +142,7 @@ type KubevirtMachineStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready",description="Is machine ready"
+// +kubebuilder:printcolumn:name="Started",type="boolean",JSONPath=".status.started",description="Has machine been ready at least once"
 
 // KubevirtMachine is the Schema for the kubevirtmachines API.
 type KubevirtMachine struct {

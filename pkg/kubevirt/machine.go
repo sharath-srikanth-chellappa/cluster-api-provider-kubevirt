@@ -268,6 +268,14 @@ func (m *Machine) IsReady() bool {
 	return m.hasReadyCondition()
 }
 
+// GetCreationTimestamp returns the creation timestamp of the VM.
+func (m *Machine) GetCreationTimestamp() time.Time {
+	if m.vmInstance != nil {
+		return m.vmInstance.CreationTimestamp.Time
+	}
+	return time.Time{}
+}
+
 // IsLiveMigratable reports back the live-migratability state of the VM: Status, Reason and Message
 func (m *Machine) IsLiveMigratable() (bool, string, string, error) {
 	if m.vmiInstance == nil {

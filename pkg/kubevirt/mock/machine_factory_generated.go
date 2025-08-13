@@ -141,6 +141,20 @@ func (mr *MockMachineInterfaceMockRecorder) GetConditions() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetConditions", reflect.TypeOf((*MockMachineInterface)(nil).GetConditions))
 }
 
+// GetCreationTimestamp mocks base method.
+func (m *MockMachineInterface) GetCreationTimestamp() time.Time {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCreationTimestamp")
+	ret0, _ := ret[0].(time.Time)
+	return ret0
+}
+
+// GetCreationTimestamp indicates an expected call of GetCreationTimestamp.
+func (mr *MockMachineInterfaceMockRecorder) GetCreationTimestamp() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCreationTimestamp", reflect.TypeOf((*MockMachineInterface)(nil).GetCreationTimestamp))
+}
+
 // GetVMNotReadyReason mocks base method.
 func (m *MockMachineInterface) GetVMNotReadyReason() (string, string) {
 	m.ctrl.T.Helper()

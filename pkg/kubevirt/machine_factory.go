@@ -30,6 +30,8 @@ type MachineInterface interface {
 	IsReady() bool
 	// IsLiveMigratable reports back the live-migratability state of the VM: Status, Reason and Message
 	IsLiveMigratable() (bool, string, string, error)
+	// GetCreationTimestamp returns the creation timestamp of the VM.
+	GetCreationTimestamp() time.Time
 	// Address returns the IP address of the VM.
 	Address() string
 	// Node returns the Node which hosts the VM.

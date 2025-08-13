@@ -285,11 +285,30 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 		// Mark VMProvisionedCondition to indicate that the VM has successfully started
 		conditions.MarkTrue(ctx.KubevirtMachine, infrav1.VMProvisionedCondition)
 	} else {
+		// Waiting for VM to boot
+		ctx.KubevirtMachine.Status.Ready = false
+		hasVMCreateFailedCondition := conditions.GetReason(ctx.KubevirtMachine, infrav1.VMProvisionedCondition) == infrav1.VMCreateFailedReason
+		if !ctx.KubevirtMachine.Status.Started && hasVMCreateFailedCondition {
+			ctx.Logger.Info("Virtual Machine is unschedulable or in error state. It has never come into Ready before")
+			if metav1.Now().Sub(externalMachine.GetCreationTimestamp()) > (300 * time.Second) {
+				ctx.Logger.Info("Virtual machine was created more than 5 minutes back")
+				ctx.Logger.Info("Deleting the VirtualMachine")
+
+				ctx.Logger.Info("Deleting VM...")
+
+				if externalMachine.Exists() {
+					if err := externalMachine.Delete(); err != nil {
+						return ctrl.Result{RequeueAfter: 10 * time.Second}, errors.Wrap(err, "failed to delete VM")
+					}
+				}
+				return ctrl.Result{}, nil
+			}
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 30}, nil
+		}
+
 		reason, _ := externalMachine.GetVMNotReadyReason()
 		conditions.MarkFalse(ctx.KubevirtMachine, infrav1.VMProvisionedCondition, reason, clusterv1.ConditionSeverityInfo, "VM not Ready")
 
-		// Waiting for VM to boot
-		ctx.KubevirtMachine.Status.Ready = false
 		ctx.Logger.Info("KubeVirt VM is not fully provisioned and running...")
 		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 	}
@@ -377,6 +396,7 @@ func (r *KubevirtMachineReconciler) reconcileNormal(ctx *context.MachineContext)
 	if externalMachine.IsReady() {
 		// if externalMachine.IsRunning() {
 		ctx.KubevirtMachine.Status.Ready = true
+		ctx.KubevirtMachine.Status.Started = true
 	} else {
 		ctx.KubevirtMachine.Status.Ready = false
 	}
