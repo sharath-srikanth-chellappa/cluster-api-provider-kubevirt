@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - command:
-        - /manager
+        - /usr/bin/cluster-api-provider-kubevirt-manager
         args:
         - "--leader-elect"
         - "--feature-gates=MachinePool=false"
