@@ -59,9 +59,9 @@ spec:
                 volumeMode: Filesystem
               source:
                 pvc:
-                  name: ${OS_IMAGE_DATAVOLUME_PREFIX}${KUBERNETES_VERSION//./-}
+                  name: ${OS_IMAGE_DATAVOLUME_PREFIX}
                   namespace: ${CLUSTER_NAMESPACE}
-          runStrategy: Always
+          running: true
           template:
             spec:
               accessCredentials:
@@ -85,8 +85,6 @@ spec:
                   model: host-passthrough
                   sockets: 1
                   threads: 1
-                memory:
-                  guest: 7Gi
                 devices:
                   disks:
                     - disk:
@@ -106,6 +104,13 @@ spec:
                   bootloader:
                     efi:
                       secureBoot: ${OS_IMAGE_USE_SECURE_BOOT:=false}
+                resources:
+                  limits:
+                    cpu: ${KUBEVIRT_CONTROL_PLANE_CORES}
+                    memory: ${KUBEVIRT_CONTROL_PLANE_MEMORY}
+                  requests:
+                    cpu: ${KUBEVIRT_CONTROL_PLANE_CORES}
+                    memory: ${KUBEVIRT_CONTROL_PLANE_MEMORY}
               evictionStrategy: External
               volumes:
                 - dataVolume:
@@ -201,7 +206,7 @@ spec:
       name: "${CLUSTER_NAME}-control-plane"
       namespace: default
   replicas: 1
-  version: v1.30.4
+  version: ${KUBERNETES_VERSION}
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
 kind: KubevirtMachineTemplate
@@ -229,9 +234,9 @@ spec:
                 volumeMode: Filesystem
               source:
                 pvc:
-                  name: ${OS_IMAGE_DATAVOLUME_PREFIX}${KUBERNETES_VERSION//./-}
+                  name: ${OS_IMAGE_DATAVOLUME_PREFIX}
                   namespace: ${CLUSTER_NAMESPACE}
-          runStrategy: Always
+          running: true
           template:
             spec:
               accessCredentials:
@@ -256,6 +261,7 @@ spec:
                   sockets: 1
                   threads: 1
                 devices:
+                  autoattachGraphicsDevice: false
                   disks:
                     - disk:
                         bus: virtio
@@ -267,8 +273,6 @@ spec:
                   interfaces:
                     - bridge: {}
                       name: default
-                memory:
-                  guest: 7Gi
                 features:
                   smm:
                     enabled: false
@@ -276,6 +280,13 @@ spec:
                   bootloader:
                     efi:
                       secureBoot: false
+                resources:
+                  limits:
+                    cpu: ${KUBEVIRT_WORKER_CORES}
+                    memory: ${KUBEVIRT_WORKER_MEMORY}
+                  requests:
+                    cpu: ${KUBEVIRT_WORKER_CORES}
+                    memory: ${KUBEVIRT_WORKER_MEMORY}
               evictionStrategy: External
               volumes:
                 - dataVolume:
