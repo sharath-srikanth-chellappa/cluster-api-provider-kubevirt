@@ -144,8 +144,8 @@ spec:
           terminated-pod-gc-threshold: "10"
       etcd:
         local:
-          imageRepository: mcr.microsoft.com/oss/etcd-io
-          imageTag: v3.5.6-13
+          imageRepository: mcr.microsoft.com/oss/v2/etcd-io
+          imageTag: v3.6.3
       imageRepository: ${CONTAINER_IMAGE_REGISTRY}
       scheduler:
         extraArgs:
@@ -310,8 +310,8 @@ spec:
       clusterConfiguration:
         etcd:
           local:
-            imageRepository: mcr.microsoft.com/oss/etcd-io
-            imageTag: v3.5.6-13
+            imageRepository: mcr.microsoft.com/oss/v2/etcd-io
+            imageTag: v3.6.3
       joinConfiguration:
         nodeRegistration:
           kubeletExtraArgs:
